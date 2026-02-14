@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Component Ripper - Extract Architectural Blueprints</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid #333;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header .tagline {
+            color: #888;
+            font-size: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .mode-selector {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            background: #1a1a1a;
+            padding: 0.5rem;
+            border-radius: 12px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 1rem;
+            border: 1px solid #333;
+            background: transparent;
+            color: #888;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .mode-btn.active {
+            background: #0a84ff;
+            color: #fff;
+            border-color: #0a84ff;
+        }
+
+        .mode-btn:hover:not(.active) {
+            border-color: #0a84ff;
+            color: #fff;
+        }
+
+        .input-section {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .input-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .input-group label {
+            display: block;
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: #fff;
+            font-size: 0.95rem;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #0a84ff;
+        }
+
+        .btn {
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            border: none;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 255, 136, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .results {
+            display: none;
+        }
+
+        .results.active {
+            display: block;
+        }
+
+        .blueprint-card {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .blueprint-card h3 {
+            color: #00ff88;
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            font-weight: 400;
+        }
+
+        .property-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .property {
+            background: #0a0a0a;
+            padding: 1rem;
+            border-radius: 8px;
+            border-left: 3px solid #00ff88;
+        }
+
+        .property-label {
+            color: #666;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .property-value {
+            color: #fff;
+            font-size: 0.9rem;
+            font-family: 'SF Mono', monospace;
+        }
+
+        .code-block {
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 1.5rem;
+            position: relative;
+            margin-top: 1rem;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .code-label {
+            color: #888;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .copy-btn {
+            background: #333;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            color: #00ff88;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #00ff88;
+            color: #000;
+        }
+
+        .code-content {
+            color: #00ff88;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 3rem;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #00ff88;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .examples {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: #1a1a1a;
+            border-radius: 12px;
+            border: 1px solid #333;
+        }
+
+        .examples h4 {
+            color: #00ff88;
+            margin-bottom: 1rem;
+            font-size: 0.95rem;
+        }
+
+        .example-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .example-chip {
+            background: #0a0a0a;
+            padding: 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid #333;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+
+        .example-chip:hover {
+            border-color: #00ff88;
+            transform: translateY(-2px);
+        }
+
+        .example-site {
+            color: #00ff88;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .example-selector {
+            color: #666;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 Component Ripper</h1>
+            <p class="tagline">Extract exact architectural blueprints from any website</p>
+        </div>
+
+        <div class="mode-selector">
+            <button class="mode-btn active" data-mode="auto" onclick="setMode('auto')">
+                🔍 Auto-Detect Sections
+            </button>
+            <button class="mode-btn" data-mode="targeted" onclick="setMode('targeted')">
+                🎯 Target Specific Component
+            </button>
+            <button class="mode-btn" data-mode="computed" onclick="setMode('computed')">
+                🎨 Computed Styles (Actual Pixels)
+            </button>
+        </div>
+
+        <div class="input-section">
+            <div class="input-group">
+                <label>Website URL</label>
+                <input type="text" id="urlInput" placeholder="https://stripe.com/docs" value="">
+            </div>
+
+            <div class="input-group" id="selectorGroup" style="display: none;">
+                <label>CSS Selector (e.g., .product-grid, nav, .hero)</label>
+                <input type="text" id="selectorInput" placeholder=".product-grid">
+            </div>
+
+            <div class="input-group" id="computedHint" style="display: none;">
+                <p style="color: #888; font-size: 0.85rem; padding: 1rem; background: #0a0a0a; border-radius: 8px; border-left: 3px solid #00ff88;">
+                    💡 <strong>Computed Styles Mode</strong> extracts ACTUAL pixel values from the browser's rendered output.<br>
+                    Example: Returns "padding: 24px 32px" instead of "p-6" or "sc-fzXfLP"
+                </p>
+            </div>
+
+            <button class="btn btn-primary" onclick="ripComponent()" id="ripBtn">
+                Extract Blueprint
+            </button>
+
+            <div class="examples">
+                <h4>📚 Example Targets:</h4>
+                <div class="example-grid">
+                    <div class="example-chip" onclick="loadExample('stripe', 'auto')">
+                        <div class="example-site">Stripe Docs</div>
+                        <div class="example-selector">Auto-detect</div>
+                    </div>
+                    <div class="example-chip" onclick="loadExample('ssense', 'grid')">
+                        <div class="example-site">SSENSE</div>
+                        <div class="example-selector">.product-grid</div>
+                    </div>
+                    <div class="example-chip" onclick="loadExample('tailwind', 'auto')">
+                        <div class="example-site">Tailwind</div>
+                        <div class="example-selector">Auto-detect</div>
+                    </div>
+                    <div class="example-chip" onclick="loadExample('nts', 'auto')">
+                        <div class="example-site">NTS Live</div>
+                        <div class="example-selector">Auto-detect</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Ripping component architecture...</p>
+        </div>
+
+        <div class="results" id="results">
+            <!-- Results will be inserted here -->
+        </div>
+    </div>
+
+    <script>
+        let currentMode = 'auto';
+
+        function setMode(mode) {
+            currentMode = mode;
+
+            // Update buttons
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+
+            // Show/hide selector input based on mode
+            const selectorGroup = document.getElementById('selectorGroup');
+            const computedHint = document.getElementById('computedHint');
+
+            if (mode === 'targeted' || mode === 'computed') {
+                selectorGroup.style.display = 'block';
+            } else {
+                selectorGroup.style.display = 'none';
+            }
+
+            // Show hint for computed mode
+            computedHint.style.display = mode === 'computed' ? 'block' : 'none';
+        }
+
+        const examples = {
+            'stripe': { url: 'https://stripe.com/docs', selector: null },
+            'ssense': { url: 'https://www.ssense.com/en-us/men', selector: '.product-grid' },
+            'tailwind': { url: 'https://tailwindcss.com', selector: null },
+            'nts': { url: 'https://nts.live', selector: null }
+        };
+
+        async function loadExample(name, mode) {
+            const ex = examples[name];
+            document.getElementById('urlInput').value = ex.url;
+
+            if (mode === 'grid' && ex.selector) {
+                setMode('targeted');
+                document.getElementById('selectorInput').value = ex.selector;
+            } else {
+                setMode('auto');
+            }
+
+            // AUTO-RUN: Immediately extract the blueprint after loading example
+            await ripComponent();
+        }
+
+        async function ripComponent() {
+            const url = document.getElementById('urlInput').value;
+            if (!url) {
+                alert('Please enter a URL');
+                return;
+            }
+
+            // For computed mode, selector is required
+            if (currentMode === 'computed') {
+                const selector = document.getElementById('selectorInput').value;
+                if (!selector) {
+                    alert('Please enter a CSS selector for computed styles mode');
+                    return;
+                }
+                return extractComputedStyles(url, selector);
+            }
+
+            const selector = currentMode === 'targeted' ?
+                document.getElementById('selectorInput').value : null;
+
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('results').classList.remove('active');
+
+            const ripBtn = document.getElementById('ripBtn');
+            ripBtn.disabled = true;
+            ripBtn.textContent = 'Ripping...';
+
+            try {
+                const response = await fetch('/api/rip-component', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        site_url: url,
+                        selector: selector
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    let errorMsg = 'Error: ' + data.error;
+                    if (data.suggestion) {
+                        errorMsg += '\n\nSuggestion: ' + data.suggestion;
+                    }
+                    alert(errorMsg);
+                    document.getElementById('loading').classList.remove('active');
+                    return;
+                }
+
+                displayBlueprint(data.blueprint);
+
+                document.getElementById('loading').classList.remove('active');
+                document.getElementById('results').classList.add('active');
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('loading').classList.remove('active');
+            } finally {
+                ripBtn.disabled = false;
+                ripBtn.textContent = 'Extract Blueprint';
+            }
+        }
+
+        async function extractComputedStyles(url, selector) {
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('results').classList.remove('active');
+
+            const ripBtn = document.getElementById('ripBtn');
+            ripBtn.disabled = true;
+            ripBtn.textContent = 'Extracting Styles...';
+
+            try {
+                const response = await fetch('/api/extract-styles', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        site_url: url,
+                        selector: selector,
+                        mode: 'critical'  // Use critical mode for designer-friendly output
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    let errorMsg = 'Error: ' + data.error;
+                    if (data.suggestion) {
+                        errorMsg += '\n\nSuggestion: ' + data.suggestion;
+                    }
+                    alert(errorMsg);
+                    document.getElementById('loading').classList.remove('active');
+                    return;
+                }
+
+                displayComputedStyles(data.styles);
+
+                document.getElementById('loading').classList.remove('active');
+                document.getElementById('results').classList.add('active');
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('loading').classList.remove('active');
+            } finally {
+                ripBtn.disabled = false;
+                ripBtn.textContent = 'Extract Blueprint';
+            }
+        }
+
+        function displayBlueprint(blueprint) {
+            console.log('Displaying blueprint:', blueprint);
+            const container = document.getElementById('results');
+            container.innerHTML = '';
+
+            // Check if blueprint is empty
+            if (!blueprint || (typeof blueprint === 'object' && Object.keys(blueprint).length === 0)) {
+                container.innerHTML = '<div class="blueprint-card"><h3>⚠️ No Components Detected</h3><p>Try using a specific selector in Targeted mode.</p></div>';
+                return;
+            }
+
+            // If auto-detect mode, blueprint is an object with section names
+            if (typeof blueprint === 'object' && !blueprint.selector) {
+                let cardCount = 0;
+                for (const [sectionName, sectionData] of Object.entries(blueprint)) {
+                    if (sectionData && typeof sectionData === 'object') {
+                        container.appendChild(createBlueprintCard(sectionName, sectionData));
+                        cardCount++;
+                    }
+                }
+
+                // If no cards were added, show message
+                if (cardCount === 0) {
+                    container.innerHTML = '<div class="blueprint-card"><h3>⚠️ No Valid Components</h3><p>The blueprint data exists but no components could be extracted. Try a different selector.</p></div>';
+                }
+            } else {
+                // Targeted mode
+                container.appendChild(createBlueprintCard('Component', blueprint));
+            }
+
+            console.log(`Displayed ${container.children.length} blueprint cards`);
+        }
+
+        function displayComputedStyles(styles) {
+            const container = document.getElementById('results');
+            container.innerHTML = '';
+
+            if (!styles.found) {
+                container.innerHTML = '<div class="blueprint-card"><h3>❌ Element Not Found</h3><p>The selector was not found on the page. Try inspecting the page to find the correct selector.</p></div>';
+                return;
+            }
+
+            const card = document.createElement('div');
+            card.className = 'blueprint-card';
+
+            let html = `<h3>🎨 Computed Styles: ${styles.selector}</h3>`;
+
+            // Critical values organized by category
+            if (styles.critical_values) {
+                const categories = styles.critical_values;
+
+                // Spacing
+                if (categories.spacing) {
+                    html += '<h4 style="color: #00ccff; margin: 1.5rem 0 1rem; font-size: 1rem;">📏 Spacing</h4>';
+                    html += '<div class="property-grid">';
+                    for (const [key, value] of Object.entries(categories.spacing)) {
+                        if (value && value !== '0px' && value !== 'none') {
+                            html += `
+                                <div class="property">
+                                    <div class="property-label">${key}</div>
+                                    <div class="property-value">${value}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    html += '</div>';
+                }
+
+                // Colors
+                if (categories.colors) {
+                    html += '<h4 style="color: #00ccff; margin: 1.5rem 0 1rem; font-size: 1rem;">🎨 Colors</h4>';
+                    html += '<div class="property-grid">';
+                    for (const [key, value] of Object.entries(categories.colors)) {
+                        if (value && value !== 'rgba(0, 0, 0, 0)' && value !== 'transparent') {
+                            html += `
+                                <div class="property">
+                                    <div class="property-label">${key}</div>
+                                    <div class="property-value">${value}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    html += '</div>';
+                }
+
+                // Typography
+                if (categories.typography) {
+                    html += '<h4 style="color: #00ccff; margin: 1.5rem 0 1rem; font-size: 1rem;">✍️ Typography</h4>';
+                    html += '<div class="property-grid">';
+                    for (const [key, value] of Object.entries(categories.typography)) {
+                        if (value && value !== 'normal' && value !== 'none') {
+                            html += `
+                                <div class="property">
+                                    <div class="property-label">${key}</div>
+                                    <div class="property-value">${value}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    html += '</div>';
+                }
+
+                // Layout
+                if (categories.layout) {
+                    html += '<h4 style="color: #00ccff; margin: 1.5rem 0 1rem; font-size: 1rem;">📐 Layout</h4>';
+                    html += '<div class="property-grid">';
+                    for (const [key, value] of Object.entries(categories.layout)) {
+                        if (value && value !== 'normal' && value !== 'none') {
+                            html += `
+                                <div class="property">
+                                    <div class="property-label">${key}</div>
+                                    <div class="property-value">${value}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    html += '</div>';
+                }
+
+                // Effects
+                if (categories.effects) {
+                    html += '<h4 style="color: #00ccff; margin: 1.5rem 0 1rem; font-size: 1rem;">✨ Effects</h4>';
+                    html += '<div class="property-grid">';
+                    for (const [key, value] of Object.entries(categories.effects)) {
+                        if (value && value !== 'normal' && value !== 'none' && value !== '1') {
+                            html += `
+                                <div class="property">
+                                    <div class="property-label">${key}</div>
+                                    <div class="property-value">${value}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    html += '</div>';
+                }
+            }
+
+            // Generated CSS (ready to copy-paste)
+            if (styles.generated_css) {
+                html += `
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-label">Copy-Paste CSS</span>
+                            <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(styles.generated_css)}\`)">Copy</button>
+                        </div>
+                        <div class="code-content">${styles.generated_css}</div>
+                    </div>
+                `;
+            }
+
+            card.innerHTML = html;
+            container.appendChild(card);
+        }
+
+        function createBlueprintCard(name, data) {
+            const card = document.createElement('div');
+            card.className = 'blueprint-card';
+
+            // Use semantic name if available (V2)
+            const displayName = data.semantic_name || name.toUpperCase();
+            const selectorInfo = data.selector ? ` <span style="color: #666; font-size: 0.75rem; font-weight: 400;">(${data.selector})</span>` : '';
+
+            let html = `<h3>🔹 ${displayName}${selectorInfo}</h3>`;
+
+            // JavaScript behavior warnings (V2)
+            if (data.javascript && data.javascript.requiresJavaScript) {
+                const js = data.javascript;
+                const patterns = js.summary.patterns || [];
+
+                html += `
+                    <div style="margin: 1rem 0; padding: 1rem; background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 8px;">
+                        <div style="color: #fbbf24; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                            ⚠️ JavaScript Required
+                        </div>
+                        <div style="color: #d97706; font-size: 0.85rem; margin-bottom: 0.75rem;">
+                            This component uses JavaScript for interactive behavior. The CSS/HTML below provides structure only.
+                        </div>
+                        ${patterns.length > 0 ? `
+                            <div style="font-size: 0.8rem; color: #92400e;">
+                                <strong>Detected patterns:</strong> ${patterns.join(', ')}
+                            </div>
+                        ` : ''}
+                        ${js.summary.totalInteractive > 0 ? `
+                            <div style="font-size: 0.8rem; color: #92400e; margin-top: 0.25rem;">
+                                <strong>Interactive elements:</strong> ${js.summary.totalInteractive} (buttons, links, form controls)
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // Box Model
+            if (data.boxModel) {
+                html += '<div class="property-grid">';
+                for (const [key, value] of Object.entries(data.boxModel)) {
+                    if (value && value !== 'none' && value !== '0px') {
+                        html += `
+                            <div class="property">
+                                <div class="property-label">${key}</div>
+                                <div class="property-value">${value}</div>
+                            </div>
+                        `;
+                    }
+                }
+                html += '</div>';
+            }
+
+            // Layout
+            if (data.layout && Object.keys(data.layout).length > 0) {
+                html += '<div class="property-grid">';
+                for (const [key, value] of Object.entries(data.layout)) {
+                    if (value) {
+                        html += `
+                            <div class="property">
+                                <div class="property-label">Layout: ${key}</div>
+                                <div class="property-value">${value}</div>
+                            </div>
+                        `;
+                    }
+                }
+                html += '</div>';
+            }
+
+            // Enhanced Tailwind extraction (V2)
+            if (data.tailwind && data.tailwind.found && data.tailwind.isTailwind) {
+                const tw = data.tailwind;
+                const cats = tw.categories;
+
+                html += `
+                    <div style="margin: 1.5rem 0; padding: 1.5rem; background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(14, 165, 233, 0.05) 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px;">
+                        <h4 style="color: #38bdf8; margin: 0 0 1rem 0; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 1.25rem;">🎨</span>
+                            Tailwind Classes (${tw.total} total)
+                        </h4>`;
+
+                // Display non-empty categories
+                const displayCategories = [
+                    {key: 'display', label: '📐 Layout', items: [...cats.display, ...cats.flexbox, ...cats.grid]},
+                    {key: 'spacing', label: '📏 Spacing', items: [...cats.padding, ...cats.margin, ...cats.space]},
+                    {key: 'colors', label: '🎨 Colors', items: [...cats.background, ...cats.text, ...cats.border]},
+                    {key: 'typography', label: '✍️ Typography', items: [...cats.fontSize, ...cats.fontWeight, ...cats.textAlign]},
+                    {key: 'effects', label: '✨ Effects', items: [...cats.shadow, ...cats.borderRadius, ...cats.opacity]},
+                    {key: 'hover', label: '🖱️ Hover States', items: cats.hover},
+                    {key: 'focus', label: '⌨️ Focus States', items: cats.focus},
+                    {key: 'responsive', label: '📱 Responsive', items: [...cats.sm, ...cats.md, ...cats.lg, ...cats.xl, ...cats['2xl']]},
+                    {key: 'transitions', label: '⏱️ Transitions', items: [...cats.transition, ...cats.duration, ...cats.ease]}
+                ];
+
+                displayCategories.forEach(cat => {
+                    if (cat.items.length > 0) {
+                        html += `
+                            <div style="margin-bottom: 0.75rem;">
+                                <div style="font-size: 0.85rem; color: #94a3b8; font-weight: 600; margin-bottom: 0.4rem;">${cat.label}</div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                                    ${cat.items.slice(0, 15).map(c => `
+                                        <code style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-family: 'SF Mono', monospace;">${c}</code>
+                                    `).join('')}
+                                    ${cat.items.length > 15 ? `<span style="color: #64748b; font-size: 0.75rem; align-self: center;">+${cat.items.length - 15} more</span>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+
+                // Copy all classes button
+                const allClassesStr = tw.allClasses.join(' ');
+                html += `
+                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(56, 189, 248, 0.2);">
+                            <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(allClassesStr)}\`)" style="width: 100%; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4);">
+                                📋 Copy All Tailwind Classes
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Code snippets
+            if (data.code) {
+                // CSS
+                if (data.code.css) {
+                    html += `
+                        <div class="code-block">
+                            <div class="code-header">
+                                <span class="code-label">CSS</span>
+                                <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(data.code.css)}\`)">Copy</button>
+                            </div>
+                            <div class="code-content">${data.code.css}</div>
+                        </div>
+                    `;
+                }
+
+                // Tailwind
+                if (data.code.tailwind) {
+                    html += `
+                        <div class="code-block">
+                            <div class="code-header">
+                                <span class="code-label">Tailwind Classes</span>
+                                <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(data.code.tailwind)}\`)">Copy</button>
+                            </div>
+                            <div class="code-content">${data.code.tailwind}</div>
+                        </div>
+                    `;
+                }
+
+                // React
+                if (data.code.react) {
+                    html += `
+                        <div class="code-block">
+                            <div class="code-header">
+                                <span class="code-label">React Component</span>
+                                <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(data.code.react)}\`)">Copy</button>
+                            </div>
+                            <div class="code-content">${data.code.react}</div>
+                        </div>
+                    `;
+                }
+            }
+
+            // Add download buttons at the end
+            html += `
+                <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #333; display: grid; gap: 0.75rem;">
+                    ${data.markdown ? `
+                        <button class="copy-btn" onclick="downloadMarkdown('${name}', ${JSON.stringify(JSON.stringify(data.markdown))})" style="width: 100%; background: linear-gradient(135deg, #a855f7 0%, #ec4899 100%); color: white; font-weight: 600; padding: 0.75rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.95rem;">
+                            📄 Download Markdown Docs
+                        </button>
+                    ` : ''}
+                    <button class="copy-btn" onclick="downloadBlueprint('${name}', ${JSON.stringify(JSON.stringify(data))})" style="width: 100%; background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%); color: #0a0a0a; font-weight: 600; padding: 0.75rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.95rem;">
+                        📥 Download Full Blueprint JSON
+                    </button>
+                </div>
+            `;
+
+            card.innerHTML = html;
+            return card;
+        }
+
+        function downloadBlueprint(name, dataStr) {
+            const data = JSON.parse(dataStr);
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${name.toLowerCase()}-blueprint.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadMarkdown(name, markdownStr) {
+            const markdown = JSON.parse(markdownStr);
+            const blob = new Blob([markdown], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${name.toLowerCase()}-component.md`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function escapeCode(code) {
+            return code.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+        }
+
+        function copyCode(button, code) {
+            navigator.clipboard.writeText(code).then(() => {
+                const original = button.textContent;
+                button.textContent = 'Copied!';
+                button.style.background = '#00ff88';
+                button.style.color = '#000';
+
+                setTimeout(() => {
+                    button.textContent = original;
+                    button.style.background = '';
+                    button.style.color = '';
+                }, 2000);
+            });
+        }
+
+        // Enter key support
+        document.getElementById('urlInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') ripComponent();
+        });
+    </script>
+</body>
+</html>

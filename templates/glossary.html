@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glossary - Web Inspector</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 2px solid #333;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 1.1rem;
+        }
+
+        .nav-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+
+        .nav-link {
+            color: #0a84ff;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: background 0.2s ease;
+        }
+
+        .nav-link:hover {
+            background: rgba(10, 132, 255, 0.1);
+        }
+
+        .section {
+            margin-bottom: 3rem;
+        }
+
+        .section-title {
+            font-size: 1.8rem;
+            color: #fff;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #333;
+        }
+
+        .glossary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .glossary-item {
+            background: #242424;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .glossary-item:hover {
+            border-color: #0a84ff;
+            transform: translateY(-2px);
+        }
+
+        .term {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #0a84ff;
+            margin-bottom: 0.5rem;
+        }
+
+        .definition {
+            color: #ccc;
+            line-height: 1.6;
+        }
+
+        .category-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: rgba(10, 132, 255, 0.15);
+            color: #0a84ff;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            margin-top: 0.75rem;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 1rem;
+            background: #242424;
+            border: 1px solid #333;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #0a84ff;
+        }
+
+        .metric-explanation {
+            background: #242424;
+            border-left: 4px solid #0a84ff;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-title {
+            font-size: 1.3rem;
+            color: #fff;
+            margin-bottom: 1rem;
+        }
+
+        .metric-section {
+            margin-bottom: 1rem;
+        }
+
+        .metric-label {
+            font-size: 0.85rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.25rem;
+        }
+
+        .metric-text {
+            color: #ccc;
+            line-height: 1.6;
+        }
+
+        .score-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .score-table th,
+        .score-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+
+        .score-table th {
+            color: #888;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .score-table td {
+            color: #ccc;
+        }
+
+        .score-range {
+            color: #0a84ff;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 Web Inspector Glossary</h1>
+            <p class="subtitle">Comprehensive guide to metrics, scores, and terminology</p>
+
+            <div class="nav-links">
+                <a href="/" class="nav-link">← Back to Inspector</a>
+                <a href="#metrics" class="nav-link">Metrics Guide</a>
+                <a href="#terms" class="nav-link">Terminology</a>
+            </div>
+        </div>
+
+        <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search glossary...">
+
+        <!-- Metrics Guide Section -->
+        <div class="section" id="metrics">
+            <h2 class="section-title">📊 Metrics Guide</h2>
+
+            <div class="metric-explanation">
+                <div class="metric-title">Spacing Scale</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Whether spacing follows a consistent mathematical pattern (powers of 2, multiples of base unit, etc.)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Consistent spacing creates visual rhythm and makes designs feel cohesive. Sites like Stripe, Airbnb, and Apple use mathematical spacing scales for this reason.</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Base unit explained</div>
+                    <div class="metric-text">The smallest spacing increment. All other values are multiples of this base (4px → 8px, 16px, 32px).</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Confidence scoring</div>
+                    <table class="score-table">
+                        <thead>
+                            <tr>
+                                <th>Factor</th>
+                                <th>Points</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Base unit found</td>
+                                <td class="score-range">+40pts</td>
+                            </tr>
+                            <tr>
+                                <td>Pattern consistency</td>
+                                <td class="score-range">+30pts</td>
+                            </tr>
+                            <tr>
+                                <td>Unique multiples</td>
+                                <td class="score-range">+20pts</td>
+                            </tr>
+                            <tr>
+                                <td>No outliers</td>
+                                <td class="score-range">+10pts</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Score ranges</div>
+                    <div class="metric-text">
+                        <strong class="score-range">95-100%:</strong> Perfect geometric scale with 30+ instances<br>
+                        <strong class="score-range">80-94%:</strong> Strong pattern with minor outliers<br>
+                        <strong class="score-range">60-79%:</strong> Noticeable pattern but inconsistent<br>
+                        <strong class="score-range">40-59%:</strong> Weak pattern, many outliers
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">Responsive Breakpoints</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Screen width breakpoints where layout changes for different devices (mobile, tablet, desktop)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Ensures the site looks good on mobile, tablet, and desktop. 60%+ of traffic is mobile nowadays.</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Common breakpoints</div>
+                    <div class="metric-text">
+                        <strong>768px:</strong> Tablet<br>
+                        <strong>1024px:</strong> Desktop (small)<br>
+                        <strong>1440px:</strong> Desktop (wide)<br>
+                        <strong>Frameworks:</strong> Bootstrap (576px, 768px, 992px, 1200px), Tailwind (640px, 768px, 1024px, 1280px)
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">Shadow System</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Consistent box-shadow values used for depth and elevation hierarchy</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Creates visual depth and helps users understand element layering (what's in front, what's behind)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Example elevation system</div>
+                    <div class="metric-text">
+                        <strong>Level 1:</strong> 0 1px 3px rgba(0,0,0,0.12) - Cards, tiles<br>
+                        <strong>Level 2:</strong> 0 4px 6px rgba(0,0,0,0.16) - Dropdowns, tooltips<br>
+                        <strong>Level 3:</strong> 0 10px 20px rgba(0,0,0,0.2) - Modals, overlays<br>
+                        <em>Similar to: Material Design elevation, Apple iOS shadows</em>
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">Z-Index Stacking</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">CSS z-index values that control which elements appear on top of others</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Proper stacking prevents visual bugs (modals appearing behind content, dropdowns hidden, etc.)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why values above 500 are hidden</div>
+                    <div class="metric-text" style="color: #ff9f0a;">
+                        ⚠️ React portals use z-index: 9999, tooltips use 999999. These aren't part of the design system - they're framework noise. We only show meaningful layers (1-500).
+                    </div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Typical stacking hierarchy</div>
+                    <div class="metric-text">
+                        <strong>1-10:</strong> Base content, images<br>
+                        <strong>100:</strong> Dropdowns, popovers<br>
+                        <strong>200:</strong> Sticky headers<br>
+                        <strong>300:</strong> Modals, dialogs<br>
+                        <strong>400:</strong> Notifications, toasts
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">Accessibility Score</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Overall accessibility quality based on WCAG (Web Content Accessibility Guidelines)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Makes the site usable for people with disabilities (screen readers, keyboard navigation, color blindness) and improves SEO</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Score breakdown</div>
+                    <table class="score-table">
+                        <thead>
+                            <tr>
+                                <th>Factor</th>
+                                <th>Points</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Semantic HTML (header, nav, main)</td>
+                                <td class="score-range">+25pts</td>
+                            </tr>
+                            <tr>
+                                <td>ARIA labels present</td>
+                                <td class="score-range">+15pts</td>
+                            </tr>
+                            <tr>
+                                <td>Alt text on images</td>
+                                <td class="score-range">+15pts</td>
+                            </tr>
+                            <tr>
+                                <td>Keyboard navigation working</td>
+                                <td class="score-range">+15pts</td>
+                            </tr>
+                            <tr>
+                                <td>Good color contrast (4.5:1)</td>
+                                <td class="score-range">+15pts</td>
+                            </tr>
+                            <tr>
+                                <td>Skip navigation link</td>
+                                <td class="score-range">+10pts</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Score ranges</div>
+                    <div class="metric-text">
+                        <strong class="score-range">90-100%:</strong> Excellent - WCAG AAA compliant<br>
+                        <strong class="score-range">75-89%:</strong> Good - WCAG AA compliant<br>
+                        <strong class="score-range">60-74%:</strong> Fair - Some issues<br>
+                        <strong class="score-range">40-59%:</strong> Poor - Many issues
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">SEO Score</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Search engine optimization quality (meta tags, structure, performance)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Better SEO means more organic traffic from Google, Bing, etc. Good SEO = more visitors without paid ads.</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Key elements</div>
+                    <div class="metric-text">
+                        • Title tag (unique, 50-60 characters)<br>
+                        • Meta description (155-160 characters)<br>
+                        • Open Graph tags (social media sharing)<br>
+                        • Schema.org markup (rich snippets in search)<br>
+                        • Mobile responsive<br>
+                        • Fast load time (< 3 seconds)
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">Security Score</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Security best practices (HTTPS, CSP, CORS, security headers)</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Protects users from XSS attacks, CSRF attacks, clickjacking, and other web vulnerabilities</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Key security headers</div>
+                    <div class="metric-text">
+                        <strong>HTTPS:</strong> Encrypted connection (locks in browser)<br>
+                        <strong>CSP:</strong> Content Security Policy (prevents XSS)<br>
+                        <strong>X-Frame-Options:</strong> Prevents clickjacking<br>
+                        <strong>X-Content-Type-Options:</strong> Prevents MIME sniffing<br>
+                        <strong>Strict-Transport-Security:</strong> Forces HTTPS
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-explanation">
+                <div class="metric-title">CSS Tricks</div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What we're checking</div>
+                    <div class="metric-text">Modern CSS features and techniques used on the site</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Why it matters</div>
+                    <div class="metric-text">Shows technical sophistication and progressive enhancement. Modern CSS = better performance and maintainability.</div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">Categories we detect</div>
+                    <div class="metric-text">
+                        • <strong>CSS Variables:</strong> Custom properties (--color-primary, --spacing-base)<br>
+                        • <strong>Flexbox:</strong> Modern layout system<br>
+                        • <strong>Grid:</strong> Advanced 2D layout (grid-template-columns)<br>
+                        • <strong>Custom Properties:</strong> @supports, clamp(), calc()<br>
+                        • <strong>Transforms:</strong> scale(), rotate(), translate()<br>
+                        • <strong>Animations:</strong> @keyframes, transition<br>
+                        • <strong>Filters:</strong> blur(), brightness(), contrast()<br>
+                        • <strong>Blend Modes:</strong> mix-blend-mode
+                    </div>
+                </div>
+
+                <div class="metric-section">
+                    <div class="metric-label">What "947 detected" means</div>
+                    <div class="metric-text" style="color: #ff9f0a;">
+                        This is the total count of modern CSS technique instances across the entire page. Click "View All" to see them categorized (e.g., "234 CSS Variables", "187 Flexbox containers").
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terminology Section -->
+        <div class="section" id="terms">
+            <h2 class="section-title">📖 Terminology</h2>
+
+            <div class="glossary-grid" id="glossaryGrid">
+                <!-- Glossary items will be inserted by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const GLOSSARY = [
+            {
+                term: "Base Unit",
+                definition: "The smallest spacing increment in a design system. All other spacing values are multiples of this base (e.g., 4px base → 8px, 16px, 32px).",
+                category: "Design System"
+            },
+            {
+                term: "Breakpoint",
+                definition: "A screen width where the layout changes to accommodate different device sizes (mobile at 768px, tablet at 1024px, desktop at 1440px).",
+                category: "Responsive Design"
+            },
+            {
+                term: "Computed Style",
+                definition: "The final CSS values after browser calculation (includes inherited values, resolved CSS variables, etc.). Different from inline styles.",
+                category: "CSS"
+            },
+            {
+                term: "Confidence Score",
+                definition: "A 0-100% score indicating how certain we are about pattern detection. Higher score = more consistent pattern. Based on multiple factors.",
+                category: "Scoring"
+            },
+            {
+                term: "CSS Grid",
+                definition: "Modern CSS layout system for creating two-dimensional layouts (both rows AND columns simultaneously). Best for complex dashboards and galleries.",
+                category: "CSS"
+            },
+            {
+                term: "CSS Variable",
+                definition: "Custom CSS property (--variable-name) that can be reused throughout stylesheets. Example: --primary-color: #0a84ff;",
+                category: "CSS"
+            },
+            {
+                term: "Design System",
+                definition: "A collection of reusable components, patterns, and guidelines for consistent design. Examples: Material Design, Ant Design, Carbon.",
+                category: "Design System"
+            },
+            {
+                term: "Elevation",
+                definition: "Visual depth created by box-shadows, making elements appear to float above the page. Used in Material Design for hierarchy.",
+                category: "Design System"
+            },
+            {
+                term: "Flexbox",
+                definition: "CSS layout system for creating one-dimensional layouts (either a row OR a column). Best for navigation bars, card rows, etc.",
+                category: "CSS"
+            },
+            {
+                term: "Modular Scale",
+                definition: "Typography scale based on a mathematical ratio (1.25x, 1.5x, 2x). Creates consistent visual rhythm in headings and text.",
+                category: "Typography"
+            },
+            {
+                term: "Semantic HTML",
+                definition: "HTML tags that convey meaning (header, nav, article, footer) vs generic tags (div, span). Better for accessibility and SEO.",
+                category: "HTML"
+            },
+            {
+                term: "System Font Stack",
+                definition: "List of fonts that uses the operating system's default font for performance. Example: -apple-system, BlinkMacSystemFont, Segoe UI",
+                category: "Typography"
+            },
+            {
+                term: "Z-Index",
+                definition: "CSS property controlling stacking order. Higher values appear on top. Typical hierarchy: content (10) → dropdowns (100) → modals (300).",
+                category: "CSS"
+            },
+            {
+                term: "WCAG",
+                definition: "Web Content Accessibility Guidelines - international standards for accessible websites. AA = good, AAA = excellent.",
+                category: "Accessibility"
+            },
+            {
+                term: "Open Graph",
+                definition: "Meta tags that control how content appears when shared on social media (Facebook, LinkedIn, etc.). Includes title, description, image.",
+                category: "SEO"
+            },
+            {
+                term: "Schema.org",
+                definition: "Structured data markup that helps search engines understand page content. Powers rich snippets (star ratings, prices, etc.) in Google.",
+                category: "SEO"
+            },
+            {
+                term: "CSP",
+                definition: "Content Security Policy - HTTP header that prevents XSS attacks by restricting which content sources are allowed on the page.",
+                category: "Security"
+            },
+            {
+                term: "CORS",
+                definition: "Cross-Origin Resource Sharing - controls which domains can access your API. Prevents unauthorized cross-domain requests.",
+                category: "Security"
+            },
+            {
+                term: "API Endpoint",
+                definition: "A URL that accepts HTTP requests to retrieve or modify data. Example: GET /api/users, POST /api/products",
+                category: "API"
+            },
+            {
+                term: "REST API",
+                definition: "Representational State Transfer - API architecture using HTTP methods (GET, POST, PUT, DELETE) for CRUD operations.",
+                category: "API"
+            },
+            {
+                term: "GraphQL",
+                definition: "Query language for APIs that lets clients request exactly the data they need. Alternative to REST with more flexibility.",
+                category: "API"
+            },
+            {
+                term: "MRI Mode",
+                definition: "Metadata Radiological Inspection - graceful degradation mode when full access is blocked. Extracts meta tags, frameworks, structure.",
+                category: "Access Strategy"
+            },
+            {
+                term: "Bot Protection",
+                definition: "Systems like Cloudflare, PerimeterX that block automated tools. Triggers MRI mode for metadata-only extraction.",
+                category: "Access Strategy"
+            },
+            {
+                term: "DOM Depth",
+                definition: "How many levels of nested HTML elements exist. Think of it like folders within folders. Shallow (≤10) = simple, deep (>20) = complex. Typical sites: 10-15 levels.",
+                category: "HTML"
+            },
+            {
+                term: "Nesting Level",
+                definition: "How deep an element is within the HTML tree. Example: html > body > div > section > p = 5 levels deep. Affects performance and maintainability.",
+                category: "HTML"
+            },
+            {
+                term: "Blur Radius",
+                definition: "How soft/blurry a shadow edge is. 0px = sharp edge, 5px = subtle, 15px = elevated (cards), 30px = floating (modals). Bigger blur = higher perceived elevation.",
+                category: "Design System"
+            },
+            {
+                term: "Y-Offset",
+                definition: "Vertical distance a shadow is cast from the element. Small (2-4px) = subtle depth, large (10-20px) = dramatic elevation. Works with blur radius.",
+                category: "Design System"
+            },
+            {
+                term: "Focus State",
+                definition: "Visual style when element has keyboard focus (tab key). Required for accessibility. Example: blue outline on buttons, underline on links.",
+                category: "Accessibility"
+            },
+            {
+                term: "Active Selector",
+                definition: "CSS selector that targets an element being clicked/pressed. Example: button:active. Shows feedback during user interaction.",
+                category: "CSS"
+            },
+            {
+                term: "Hover State",
+                definition: "Visual change when mouse cursor is over an element. Example: button changes color, link underlines. Not available on touch devices.",
+                category: "CSS"
+            },
+            {
+                term: "Viewport",
+                definition: "The visible area of your browser window. Mobile = small (375px), tablet = medium (768px), desktop = large (1280px+). Sites adapt to viewport size.",
+                category: "Responsive Design"
+            },
+            {
+                term: "Breakpoint",
+                definition: "Screen width where layout changes. Common: 640px (mobile), 768px (tablet), 1024px (laptop), 1280px (desktop). Defined in @media queries.",
+                category: "Responsive Design"
+            },
+            {
+                term: "Visual Weight",
+                definition: "How much an element grabs attention. Determined by: size, color contrast, position, whitespace. Higher weight = eye goes there first.",
+                category: "Design System"
+            },
+            {
+                term: "Base Unit",
+                definition: "Foundation spacing value that other spacing multiples of. If base = 8px, scale is 8, 16, 24, 32, 48, 64px. Creates visual rhythm.",
+                category: "Design System"
+            },
+            {
+                term: "Heuristic",
+                definition: "A rule of thumb or educated guess. Heuristic detection uses patterns and common conventions rather than perfect analysis. Fast but not 100% accurate.",
+                category: "Analysis Method"
+            },
+            {
+                term: "Confidence Score",
+                definition: "How certain the tool is (0-100%). High (80%+) = very reliable, Medium (60-79%) = probably correct, Low (<60%) = uncertain, verify manually.",
+                category: "Scoring"
+            },
+            {
+                term: "Edge Density",
+                definition: "How many sharp lines/borders exist in an area (detected via computer vision). High edge density = detailed/complex, low = simple/minimal.",
+                category: "Computer Vision"
+            },
+            {
+                term: "Contrast",
+                definition: "Difference between colors. High contrast = easy to read (black on white). Low contrast = hard to read (light gray on white). WCAG requires 4.5:1 for text.",
+                category: "Accessibility"
+            },
+            {
+                term: "Whitespace",
+                definition: "Empty space around elements. More whitespace = clean/breathable design, less = dense/cramped. Also called 'negative space'.",
+                category: "Design System"
+            },
+            {
+                term: "Optical Center",
+                definition: "Where your eye naturally looks first on a page. Usually 33% from top, centered horizontally (F-pattern reading). Important for hero placement.",
+                category: "Visual Hierarchy"
+            },
+            {
+                term: "Snackbar",
+                definition: "Brief message that appears at bottom of screen, then disappears. Named after Android's UI pattern. Example: 'Message sent' confirmation.",
+                category: "UI Pattern"
+            },
+            {
+                term: "Dropdown Menu",
+                definition: "Menu that appears when clicking a trigger (usually nav item or button). Requires JavaScript to toggle open/closed state.",
+                category: "UI Pattern"
+            },
+            {
+                term: "Modal",
+                definition: "Popup dialog that dims the background and requires user action before continuing. High z-index (usually 1000+) to appear on top of everything.",
+                category: "UI Pattern"
+            },
+            {
+                term: "Accordion",
+                definition: "Collapsible sections where clicking header expands/collapses content. Only one section open at a time. Common in FAQs.",
+                category: "UI Pattern"
+            },
+            {
+                term: "Hamburger Menu",
+                definition: "Three horizontal lines icon (≡) that opens mobile navigation. Typically hidden on desktop, visible on mobile < 768px.",
+                category: "UI Pattern"
+            },
+            {
+                term: "Hero Section",
+                definition: "Large banner at top of page with key message/image. First thing users see. Usually includes heading, description, and CTA button.",
+                category: "UI Pattern"
+            }
+        ];
+
+        // Render glossary items
+        const grid = document.getElementById('glossaryGrid');
+        GLOSSARY.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'glossary-item';
+            div.innerHTML = `
+                <div class="term">${item.term}</div>
+                <div class="definition">${item.definition}</div>
+                <span class="category-badge">${item.category}</span>
+            `;
+            grid.appendChild(div);
+        });
+
+        // Search functionality
+        const searchBox = document.getElementById('searchBox');
+        searchBox.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            document.querySelectorAll('.glossary-item, .metric-explanation').forEach(item => {
+                const text = item.textContent.toLowerCase();
+                item.style.display = text.includes(query) ? 'block' : 'none';
+            });
+        });
+    </script>
+</body>
+</html>
