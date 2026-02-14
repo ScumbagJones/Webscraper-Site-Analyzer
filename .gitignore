@@ -1,0 +1,13 @@
+venv*/
+__pycache__/
+*.pyc
+node_modules/
+*.log
+*.backup
+.env
+*.html
+!templates/*.html
+archive/
+tasks/
+docs/
+*.jsonl
