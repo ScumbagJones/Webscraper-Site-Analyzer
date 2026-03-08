@@ -25,7 +25,11 @@ from datetime import datetime
 from urllib.parse import urlparse
 import ipaddress
 import socket
-import anthropic
+# import anthropic  # hangs on this system — chat feature disabled
+ANTHROPIC_AVAILABLE = False
+
+# Wizard configuration
+WIZARD_MAX_PAGES = 5  # Max pages for "Scan All" diversity selection
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +120,8 @@ def run_async(coro):
     finally:
         loop.close()
 
-# Initialize Anthropic client
-anthropic_client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY")
-)
+# Initialize Anthropic client (disabled if import failed — hangs on this system)
+anthropic_client = None  # anthropic disabled (hangs on import on this system)
 
 
 @app.route('/')
@@ -201,7 +203,9 @@ def rip_component():
     {
         "site_url": "https://ssense.com/en-us/men",
         "selector": ".product-grid",  # Optional - auto-detect if not provided
-        "auth_state": null  # Optional - path to saved auth state
+        "auth_state": null,  # Optional - path to saved auth state
+        "include_states": false,  # Optional - capture hover/focus state deltas
+        "output_format": "json"  # Optional - 'json' or 'figma' (Tailwind JSX markdown)
     }
     """
     data = request.json
@@ -210,6 +214,8 @@ def rip_component():
     if selector and selector.lower() == 'auto':
         selector = None
     auth_state = data.get('auth_state')  # Optional
+    include_states = data.get('include_states', False)
+    output_format = data.get('output_format', 'json')
 
     site_url, url_error = validate_url(site_url)
     if url_error:
@@ -222,10 +228,14 @@ def rip_component():
             print(f"    Target: {selector}")
         else:
             print(f"    Mode: Auto-detect sections")
+        if include_states:
+            print(f"    States: enabled")
+        if output_format == 'figma':
+            print(f"    Output: Figma-compatible markdown")
         print('='*70)
 
         ripper = ComponentRipper(site_url, selector)
-        blueprint = run_async(ripper.rip(auth_state))
+        blueprint = run_async(ripper.rip(auth_state, include_states=include_states, output_format=output_format))
 
         print("\n✅ Component rip complete!")
 
@@ -326,25 +336,30 @@ def extract_styles():
 @app.route('/api/discover-urls', methods=['POST'])
 def discover_urls():
     """
-    Extract all links from a page for LLM navigation planning
+    Extract all links from a page for LLM navigation planning.
+    Supports interactive discovery (clicking dropdowns/menus).
 
     Request body:
     {
-        "site_url": "https://pi.fyi"
+        "site_url": "https://pi.fyi",
+        "interactive": true   // optional — clicks dropdowns to discover hidden links
     }
 
     Returns:
     {
         "base_url": "https://pi.fyi",
-        "navigation_links": [...],
-        "article_links": [...],
-        "section_links": [...],
-        "external_links": [...],
-        "total_internal": 47
+        "discovered_links": { navigation: [...], articles: [...], sections: [...], all: [...] },
+        "interactive_discovery": {  // only when interactive: true
+            "interaction_log": [...],
+            "total_static": 32,
+            "total_interactive": 14,
+            "total_unique": 42
+        }
     }
     """
     data = request.json
     site_url = data.get('site_url')
+    interactive = data.get('interactive', False)
 
     site_url, url_error = validate_url(site_url)
     if url_error:
@@ -353,14 +368,19 @@ def discover_urls():
     try:
         print(f"\n{'='*70}")
         print(f" 🔗 URL DISCOVERY: {site_url}")
+        print(f" 🔍 Interactive: {interactive}")
         print('='*70)
 
         async def discover():
-            from playwright.async_api import async_playwright
+            from patchright.async_api import async_playwright
 
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
+                context = await browser.new_context(
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+                page = await context.new_page()
                 page.set_default_timeout(60000)
 
                 # Load page
@@ -369,29 +389,182 @@ def discover_urls():
 
                 # Create engine to use link discovery
                 engine = DeepEvidenceEngine(site_url)
-                links = await engine._discover_links(page, site_url)
 
-                await browser.close()
-                return links
+                if interactive:
+                    # Full interactive discovery — clicks dropdowns, hamburgers, etc.
+                    result = await engine._discover_interactive_links(page, site_url)
+                    # Re-categorize all_links into navigation/articles/sections buckets
+                    static_links = await engine._discover_links(page, site_url)
+                    # Merge: static_links has categorized buckets, interactive adds extra
+                    interactive_urls = {l['url'] if isinstance(l, dict) else l for l in result.get('interactive_links', [])}
+                    # Add interactive-only links to appropriate bucket (default: navigation)
+                    for link in result.get('interactive_links', []):
+                        url = link['url'] if isinstance(link, dict) else link
+                        text = link.get('text', '') if isinstance(link, dict) else ''
+                        if url not in {l['url'] if isinstance(l, dict) else l for l in static_links.get('all', [])}:
+                            static_links.setdefault('navigation', []).append({
+                                'url': url, 'text': text, 'source': 'interactive'
+                            })
+                            static_links.setdefault('all', []).append({
+                                'url': url, 'text': text, 'source': 'interactive'
+                            })
 
-        links = run_async(discover())
+                    await browser.close()
+                    return {
+                        'links': static_links,
+                        'interactive_discovery': {
+                            'interaction_log': result.get('interaction_log', []),
+                            'total_static': result.get('total_static', 0),
+                            'total_interactive': result.get('total_interactive', 0),
+                            'total_unique': result.get('total_unique', 0),
+                        }
+                    }
+                else:
+                    links = await engine._discover_links(page, site_url)
+                    await browser.close()
+                    return {'links': links, 'interactive_discovery': None}
 
-        print(f"\n✅ Found {len(links.get('all', []))} total links")
+        result = run_async(discover())
+        links = result['links']
+        interactive_meta = result['interactive_discovery']
+
+        total = len(links.get('all', []))
+        print(f"\n✅ Found {total} total links")
         print(f"   Navigation: {len(links.get('navigation', []))}")
         print(f"   Articles: {len(links.get('articles', []))}")
         print(f"   Sections: {len(links.get('sections', []))}")
+        if interactive_meta:
+            print(f"   Interactive: {interactive_meta['total_interactive']} from dropdowns")
 
-        return jsonify({
+        response = {
             'success': True,
             'base_url': site_url,
-            'discovered_links': links
-        })
+            'discovered_links': links,
+        }
+        if interactive_meta:
+            response['interactive_discovery'] = interactive_meta
+
+        return jsonify(response)
 
     except Exception as e:
         logger.error(f"Error during URL discovery: {e}", exc_info=True)
         return jsonify({
             'error': 'URL discovery failed. The site may be blocking automated access.',
             'suggestion': 'Try a different page or check server logs.'
+        }), 500
+
+
+@app.route('/api/score-urls', methods=['POST'])
+def score_urls():
+    """
+    Server-side URL diversity scoring for the wizard's "Scan All" feature.
+
+    Request body:
+    {
+        "site_url": "https://stripe.com",
+        "urls": ["https://stripe.com/payments", "https://stripe.com/docs", ...],
+        "max_pages": 5  // optional, defaults to WIZARD_MAX_PAGES
+    }
+
+    Returns:
+    {
+        "success": true,
+        "selected_urls": {"home": "https://stripe.com", "page_1": "...", ...}
+    }
+    """
+    data = request.json
+    site_url = data.get('site_url')
+    urls = data.get('urls', [])
+    max_pages = data.get('max_pages', WIZARD_MAX_PAGES)
+
+    site_url, url_error = validate_url(site_url)
+    if url_error:
+        return jsonify({'error': url_error}), 400
+
+    if not urls or len(urls) < 2:
+        return jsonify({'error': 'Need at least 2 URLs to score'}), 400
+
+    # Cap max_pages to a reasonable limit
+    max_pages = min(int(max_pages), 10)
+
+    try:
+        engine = DeepEvidenceEngine(site_url, analysis_mode='interactive')
+        selected = engine._select_diverse_pages(urls, site_url, max_pages=max_pages)
+        return jsonify({'success': True, 'selected_urls': selected})
+    except Exception as e:
+        logger.error(f"Error during URL scoring: {e}", exc_info=True)
+        return jsonify({'error': 'URL scoring failed.'}), 500
+
+
+@app.route('/api/multi-scan', methods=['POST'])
+def multi_scan():
+    """
+    Analyze user-selected pages (for Interactive Discovery mode).
+
+    Request body:
+    {
+        "site_url": "https://stripe.com",
+        "urls": ["https://stripe.com", "https://stripe.com/payments", ...]
+    }
+
+    Returns:
+    {
+        "success": true,
+        "evidence": { ...multi-page synthesis... }
+    }
+    """
+    data = request.json
+    site_url = data.get('site_url')
+    urls = data.get('urls', [])
+    analysis_focus = data.get('analysis_focus', 'full')  # 'full'|'design'|'interaction'|'layout'
+
+    site_url, url_error = validate_url(site_url)
+    if url_error:
+        return jsonify({'error': url_error}), 400
+
+    if not urls:
+        return jsonify({'error': 'URLs array required (at least 1 URL)'}), 400
+
+    # Validate each URL and cap at 10
+    urls = urls[:10]
+    validated_urls = []
+    for u in urls:
+        clean_url, err = validate_url(u)
+        if err:
+            return jsonify({'error': f'Invalid URL in list: {u} — {err}'}), 400
+        validated_urls.append(clean_url)
+
+    try:
+        print(f"\n{'='*70}")
+        print(f" 🎯 MULTI-SCAN: {site_url}")
+        print(f" 📄 Pages: {len(validated_urls)}  Focus: {analysis_focus}")
+        print('='*70)
+
+        engine = DeepEvidenceEngine(site_url, analysis_mode='interactive')
+        evidence = run_async(engine.multi_scan(validated_urls, analysis_focus=analysis_focus))
+        evidence['analysis_focus'] = analysis_focus  # Pass through to frontend
+
+        print(f"\n✅ Multi-scan complete!")
+        print(f"   Extracted {len(evidence)} evidence keys")
+
+        cleaned_evidence = {k: v for k, v in evidence.items() if v is not None}
+
+        return jsonify({
+            'success': True,
+            'evidence': cleaned_evidence
+        })
+
+    except TimeoutError as e:
+        logger.error(f"Timeout during multi-scan: {e}")
+        return jsonify({
+            'error': 'Multi-scan timed out. Try fewer pages or simpler sites.',
+        }), 504
+
+    except Exception as e:
+        logger.error(f"Error during multi-scan: {e}", exc_info=True)
+        return jsonify({
+            'error': 'Multi-scan failed. Check server logs for details.',
+            'suggestion': 'Try fewer pages or check if the site blocks automated access.'
         }), 500
 
 
@@ -491,100 +664,231 @@ def export_markdown():
 
 
 def generate_markdown_report(evidence):
-    """Generate comprehensive markdown report"""
-    md = f"# Website Analysis Report\n\n"
-    md += f"**URL:** {evidence.get('meta_info', {}).get('url', 'Unknown')}\n\n"
+    """Generate comprehensive markdown report covering all evidence sections"""
+    md = "# Website Analysis Report\n\n"
+    md += f"**URL:** {evidence.get('meta_info', {}).get('url', 'Unknown')}  \n"
+    md += f"**Scanned:** {evidence.get('meta_info', {}).get('timestamp', 'N/A')}  \n"
+    md += f"**Access Strategy:** {evidence.get('access_strategy', 'patchright')}  \n\n"
 
-    # Layout
-    if 'layout' in evidence:
-        md += f"## 📐 Layout System\n\n"
-        md += f"**Pattern:** {evidence['layout']['pattern']}\n"
-        md += f"**Confidence:** {evidence['layout']['confidence']}%\n\n"
-        if evidence['layout'].get('code_snippets'):
-            md += f"```css\n{evidence['layout']['code_snippets']}\n```\n\n"
+    # --- Summary table ---
+    md += "## Summary Dashboard\n\n"
+    md += "| Metric | Pattern | Confidence |\n|--------|---------|------------|\n"
+    summary_keys = [
+        ('Typography', 'typography'), ('Colors', 'colors'), ('Spacing', 'spacing_scale'),
+        ('Shadows', 'shadow_system'), ('Z-Index', 'z_index'), ('Layout', 'layout'),
+        ('Visual Hierarchy', 'visual_hierarchy'), ('Motion', 'motion_tokens'),
+        ('Responsive', 'responsive_breakpoints'), ('Accessibility', 'accessibility'),
+        ('Performance', 'performance'), ('SEO', 'seo'), ('Security', 'security'),
+    ]
+    for label, key in summary_keys:
+        data = evidence.get(key, {})
+        if isinstance(data, dict) and 'confidence' in data:
+            pat = str(data.get('pattern', '')).replace('|', '/').replace('\n', ' ')[:60]
+            md += f"| {label} | {pat} | {data['confidence']}% |\n"
+    md += "\n"
 
-    # Typography
+    # --- Typography ---
     if 'typography' in evidence:
-        md += f"## 🖋️ Typography\n\n"
-        md += f"**Pattern:** {evidence['typography']['pattern']}\n"
-        md += f"**Type Scale:** {evidence['typography'].get('type_scale', 'N/A')}\n\n"
-        if evidence['typography'].get('code_snippets'):
-            md += f"```css\n{evidence['typography']['code_snippets']}\n```\n\n"
+        t = evidence['typography']
+        md += "## Typography\n\n"
+        md += f"**Pattern:** {t.get('pattern', 'N/A')}\n\n"
+        ts = t.get('type_scale', {})
+        if isinstance(ts, dict):
+            if ts.get('ratio'): md += f"- **Type Scale Ratio:** {ts['ratio']}\n"
+            if ts.get('sizes_px'): md += f"- **Sizes:** {', '.join(str(s) for s in ts['sizes_px'])}px\n"
+            if ts.get('heading_sizes_px'): md += f"- **Heading Sizes:** {', '.join(str(s) for s in ts['heading_sizes_px'])}px\n"
+        details = t.get('details', {})
+        if details.get('font_stack'): md += f"- **Font Stack:** {', '.join(details['font_stack'])}\n"
+        if details.get('body_size'): md += f"- **Body Size:** {details['body_size']}\n"
+        md += "\n"
 
-    # Accessibility
+    # --- Colors ---
+    if 'colors' in evidence:
+        c = evidence['colors']
+        md += "## Color Palette\n\n"
+        palette = c.get('palette', {})
+        if isinstance(palette, dict):
+            for cat in ['primary', 'secondary', 'intentional']:
+                colors = palette.get(cat, [])
+                if colors:
+                    md += f"### {cat.title()} Colors\n"
+                    for col in colors[:8]:
+                        if isinstance(col, dict):
+                            hex_val = col.get('hex', col.get('color', str(col)))
+                            count = col.get('count', '')
+                        else:
+                            hex_val = str(col)
+                            count = ''
+                        md += f"- `{hex_val}`{' (' + str(count) + ' uses)' if count else ''}\n"
+                    md += "\n"
+        if c.get('color_roles'):
+            md += "### CSS Variable Roles\n"
+            for role, val in list(c['color_roles'].items())[:12]:
+                v = val.get('value', val) if isinstance(val, dict) else val
+                md += f"- `--{role}`: {v}\n"
+            md += "\n"
+
+    # --- Spacing ---
+    if 'spacing_scale' in evidence:
+        sp = evidence['spacing_scale']
+        md += "## Spacing Scale\n\n"
+        if sp.get('base_unit'): md += f"- **Base Unit:** {sp['base_unit']}\n"
+        scale = sp.get('scale', sp.get('values', []))
+        if scale: md += f"- **Scale:** {', '.join(str(v) for v in scale)}\n"
+        md += "\n"
+
+    # --- Shadows ---
+    if 'shadow_system' in evidence and evidence['shadow_system'].get('levels'):
+        ss = evidence['shadow_system']
+        md += "## Shadow System\n\n"
+        md += "| Level | CSS Value | Usage |\n|-------|-----------|-------|\n"
+        for lvl in ss['levels']:
+            css = str(lvl.get('css', '')).replace('|', '/').replace('\n', ' ')[:50]
+            md += f"| {lvl.get('name', '?')} | `{css}` | {lvl.get('count', 0)} elements |\n"
+        md += "\n"
+
+    # --- Z-Index ---
+    z_data = evidence.get('z_index_stack', evidence.get('z_index', {}))
+    if z_data and z_data.get('layers'):
+        md += "## Z-Index Architecture\n\n"
+        md += "| Layer | Z-Value | Elements |\n|-------|---------|----------|\n"
+        for name, info in z_data['layers'].items():
+            z = info.get('z_index', '?')
+            count = info.get('visible_count', info.get('count', 0))
+            label = name.split(': ')[-1] if ': ' in name else name
+            md += f"| {label} | {z} | {count} |\n"
+        md += "\n"
+
+    # --- Visual Hierarchy ---
+    if 'visual_hierarchy' in evidence:
+        vh = evidence['visual_hierarchy']
+        md += "## Visual Hierarchy\n\n"
+        hero = vh.get('hero_section', {})
+        if hero: md += f"- **Hero Section:** {'Detected' if hero.get('detected') else 'Not detected'}\n"
+        cta = vh.get('primary_cta', {})
+        if cta: md += f"- **Primary CTA:** {cta.get('text', 'Detected') if cta.get('detected') else 'Not detected'}\n"
+        md += "\n"
+
+    # --- Motion Tokens ---
+    if 'motion_tokens' in evidence:
+        mt = evidence['motion_tokens']
+        details = mt.get('details', {})
+        md += "## Motion & Animation\n\n"
+        if details.get('personality'): md += f"- **Personality:** {details['personality']}\n"
+        ds = details.get('duration_scale', {})
+        if ds:
+            md += "- **Duration Scale:**\n"
+            for tier, data in ds.items():
+                if isinstance(data, dict) and data.get('count', 0) > 0:
+                    md += f"  - {tier}: {data.get('range_ms', '')} ({data['count']} animations)\n"
+        if details.get('easing_palette'):
+            md += f"- **Easing Curves:** {len(details['easing_palette'])} unique\n"
+        md += "\n"
+
+    # --- Spatial Composition ---
+    if 'spatial_composition' in evidence:
+        sc = evidence['spatial_composition']
+        ps = sc.get('page_structure', {})
+        md += "## Spatial Composition\n\n"
+        if ps.get('pattern_type'): md += f"- **Page Pattern:** {ps['pattern_type']}\n"
+        ws = sc.get('whitespace_analysis', {})
+        if ws.get('content_density'): md += f"- **Content Density:** {ws['content_density']}%\n"
+        if ws.get('interpretation'): md += f"- **Interpretation:** {ws['interpretation']}\n"
+        ap = sc.get('alignment_patterns', {})
+        if ap.get('dominant'): md += f"- **Alignment:** {ap['dominant']}\n"
+        md += "\n"
+
+    # --- Responsive Breakpoints ---
+    if 'responsive_breakpoints' in evidence:
+        bp = evidence['responsive_breakpoints']
+        breakpoints = bp.get('breakpoints', bp.get('media_queries', []))
+        if breakpoints:
+            md += "## Responsive Breakpoints\n\n"
+            md += "| Width | Media Query |\n|-------|-------------|\n"
+            for b in breakpoints[:10]:
+                width = b.get('width', b.get('min_width', b.get('max_width', '?')))
+                query = b.get('query', b.get('media', f'{width}px'))
+                md += f"| {width}px | `{str(query)[:60]}` |\n"
+            md += "\n"
+        elif bp.get('unique_breakpoints'):
+            md += "## Responsive Breakpoints\n\n"
+            md += f"- **Unique Breakpoints:** {bp['unique_breakpoints']}\n"
+            md += f"- **Total Media Queries:** {bp.get('total_media_queries', 0)}\n"
+            if bp.get('current_size'): md += f"- **Current Viewport:** {bp['current_size']}\n"
+            md += "\n"
+
+    # --- Site Architecture ---
+    if 'site_architecture' in evidence:
+        arch = evidence['site_architecture'].get('details', {})
+        md += "## Site Architecture\n\n"
+        if arch.get('framework'): md += f"- **Framework:** {arch['framework']}\n"
+        if arch.get('css_framework'): md += f"- **CSS Framework:** {arch['css_framework']}\n"
+        if arch.get('bundler'): md += f"- **Bundler:** {arch['bundler']}\n"
+        if arch.get('state_mgmt'): md += f"- **State Management:** {arch['state_mgmt']}\n"
+        if arch.get('router_type'): md += f"- **Router:** {arch['router_type']}\n"
+        caps = arch.get('capabilities', {})
+        active = [k.replace('_', ' ') for k, v in caps.items() if v]
+        if active: md += f"- **Capabilities:** {', '.join(active)}\n"
+        md += "\n"
+
+    # --- Accessibility, Performance, SEO, Security (existing) ---
     if 'accessibility' in evidence:
-        md += f"## ♿ Accessibility\n\n"
+        md += "## Accessibility\n\n"
         md += f"**Score:** {evidence['accessibility'].get('score', 0)}/100\n\n"
-        if evidence['accessibility'].get('recommendations'):
-            md += f"**Recommendations:**\n"
-            for rec in evidence['accessibility']['recommendations']:
-                md += f"- {rec}\n"
-            md += "\n"
+        for rec in evidence['accessibility'].get('recommendations', []):
+            md += f"- {rec}\n"
+        md += "\n"
 
-    # Performance
+    if 'contrast_a11y' in evidence and evidence['contrast_a11y'].get('details'):
+        ca = evidence['contrast_a11y']
+        md += "## Contrast Audit (WCAG AA)\n\n"
+        md += f"- **Score:** {ca.get('score', '?')}/100\n"
+        md += f"- **Violations:** {ca['details'].get('total_violations', 0)}\n"
+        md += f"- **Passes:** {ca['details'].get('total_passes', 0)}\n\n"
+
     if 'performance' in evidence:
-        md += f"## ⚡ Performance\n\n"
-        md += f"**Load Time:** {evidence['performance']['pattern']}\n\n"
-        if evidence['performance'].get('recommendations'):
-            md += f"**Recommendations:**\n"
-            for rec in evidence['performance']['recommendations']:
-                md += f"- {rec}\n"
-            md += "\n"
+        md += "## Performance\n\n"
+        md += f"**Pattern:** {evidence['performance'].get('pattern', 'N/A')}\n\n"
 
-    # SEO
     if 'seo' in evidence:
-        md += f"## 🔍 SEO\n\n"
-        md += f"**Score:** {evidence['seo'].get('score', 0)}/100\n\n"
         seo_details = evidence['seo'].get('details', {})
+        md += "## SEO\n\n"
+        md += f"**Score:** {evidence['seo'].get('score', 0)}/100\n\n"
         md += f"- **Title:** {seo_details.get('title', 'N/A')}\n"
-        md += f"- **Description:** {seo_details.get('description', 'N/A')}\n"
-        md += f"- **H1 Count:** {seo_details.get('h1_count', 0)}\n\n"
+        md += f"- **Description:** {seo_details.get('description', 'N/A')}\n\n"
 
-    # Security
     if 'security' in evidence:
-        md += f"## 🔒 Security\n\n"
+        md += "## Security\n\n"
         md += f"**Score:** {evidence['security'].get('score', 0)}/100\n\n"
-        if evidence['security'].get('recommendations'):
-            md += f"**Recommendations:**\n"
-            for rec in evidence['security']['recommendations']:
-                md += f"- {rec}\n"
+
+    # --- Content Structure ---
+    if 'content_extraction' in evidence:
+        ce = evidence['content_extraction']
+        md += "## Content Structure\n\n"
+        md += f"- **Page Type:** {ce.get('page_type', 'unknown')}\n"
+        if ce.get('reasoning'): md += f"- **Reasoning:** {ce['reasoning']}\n"
+        if ce.get('semantic_analysis', {}).get('score') is not None:
+            md += f"- **Semantic Score:** {ce['semantic_analysis']['score']}/100\n"
+        md += "\n"
+
+    # --- Articles ---
+    if 'article_content' in evidence and evidence['article_content'].get('articles'):
+        md += "## Extracted Articles\n\n"
+        for article in evidence['article_content']['articles']:
+            md += f"### {article.get('title', 'Untitled')}\n\n"
+            if article.get('author'): md += f"- **Author:** {article['author']}\n"
+            if article.get('date'): md += f"- **Date:** {article['date']}\n"
+            md += f"- **Confidence:** {article.get('confidence', '?')}%\n"
+            if article.get('word_count'): md += f"- **Word Count:** {article['word_count']}\n"
             md += "\n"
 
-    # Articles
-    if 'article_content' in evidence and evidence['article_content'].get('articles'):
-        md += f"## 📄 Extracted Articles\n\n"
-        for article in evidence['article_content']['articles']:
-            md += f"### {article['title']}\n\n"
-            md += f"- **Author:** {article['author']}\n"
-            md += f"- **Date:** {article.get('date', 'N/A')}\n"
-            md += f"- **Confidence:** {article['confidence']}%\n"
-            md += f"- **Status:** {article['status']}\n"
-            md += f"- **Word Count:** {article['word_count']}\n\n"
-            md += f"{article['preview']}\n\n"
-
-    # API Patterns
-    if 'api_patterns' in evidence:
-        md += f"## 📡 API Patterns\n\n"
-        md += f"**Pattern:** {evidence['api_patterns']['pattern']}\n"
-        if evidence['api_patterns'].get('code_snippets'):
-            md += f"\n```javascript\n{evidence['api_patterns']['code_snippets']}\n```\n\n"
-
-    # CSS Tricks
-    if 'css_tricks' in evidence and evidence['css_tricks'].get('details', {}).get('custom_properties'):
-        md += f"## 🎯 CSS Tricks\n\n"
-        md += f"**Custom Properties:** {len(evidence['css_tricks']['details']['custom_properties'])}\n\n"
-        if evidence['css_tricks'].get('code_snippets'):
-            md += f"```css\n{evidence['css_tricks']['code_snippets']}\n```\n\n"
-
-    # Meta Info
+    # --- Meta ---
     if 'meta_info' in evidence:
-        md += f"## 📊 Technical Summary\n\n"
+        md += "## Technical Summary\n\n"
         md += f"- **Total DOM Nodes:** {evidence['meta_info'].get('total_dom_nodes', 0):,}\n"
         md += f"- **Total Network Requests:** {evidence['meta_info'].get('total_requests', 0)}\n\n"
 
-    md += f"---\n\n"
-    md += f"*Report generated by Web Intelligence Dashboard*\n"
-
+    md += "---\n\n*Report generated by Web Intelligence Scraper*\n"
     return md
 
 
@@ -602,7 +906,13 @@ def generate_ai_summary():
         if not evidence:
             return jsonify({'error': 'No evidence provided'}), 400
 
-        # Check if API key is configured
+        # Check if anthropic is available and API key is configured
+        if not ANTHROPIC_AVAILABLE or not anthropic_client:
+            return jsonify({
+                'error': 'Anthropic client unavailable',
+                'summary': '📝 AI summary unavailable on this system.',
+                'generated_at': datetime.now().isoformat()
+            }), 400
         if not os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") == "your_api_key_here":
             return jsonify({
                 'error': 'Anthropic API key not configured',

@@ -29,6 +29,9 @@ class PageType(Enum):
     API_REFERENCE = "apiReference"
     DOCUMENTATION = "documentation"
     MEDIA_LISTING = "mediaListing"
+    AUDIO_STREAM = "audioStream"
+    SHOW_ARCHIVE = "showArchive"
+    PODCAST_LISTING = "podcastListing"
     LANDING_PAGE = "landingPage"
     UNKNOWN = "unknown"
 
@@ -188,6 +191,44 @@ class IntelligentContentExtractor:
                 });
             }
 
+            // Audio/stream/podcast detection
+            const audioEls = document.querySelectorAll('audio, [data-player], [data-stream], .player');
+            const videoEls = document.querySelectorAll('video:not([muted]):not([autoplay])');
+            const mixEls = document.querySelectorAll('.mix, [data-mix], .broadcast, .livestream, .live-player, .stream');
+            const scheduleEls = document.querySelectorAll('.schedule, [data-schedule], .timetable, .programming, .airtime');
+            const schemaAudio = document.querySelectorAll('[itemtype*="AudioObject"], [itemtype*="RadioBroadcast"], [itemtype*="MusicRecording"], [itemtype*="PodcastEpisode"]');
+            const podcastEls = document.querySelectorAll('.episode, [data-episode], .podcast-episode, [itemtype*="PodcastEpisode"]');
+
+            // Live audio stream (radio, DJ sets)
+            if (audioEls.length > 0 && (mixEls.length > 0 || scheduleEls.length > 0)) {
+                signals.push({
+                    type: 'audioStream',
+                    count: audioEls.length,
+                    confidence: 0.85,
+                    reasoning: `Live audio stream: ${audioEls.length} player(s), ${mixEls.length} show/mix elements, ${scheduleEls.length} schedule elements`
+                });
+            }
+
+            // Show/mix archive
+            if (mixEls.length > 3 || (shows.length > 3 && audioEls.length > 0)) {
+                signals.push({
+                    type: 'showArchive',
+                    count: mixEls.length + shows.length,
+                    confidence: 0.8,
+                    reasoning: `Show/mix archive: ${mixEls.length + shows.length} archive items with audio presence`
+                });
+            }
+
+            // Podcast listing
+            if (podcastEls.length > 2 || (schemaAudio.length > 2 && audioEls.length > 0)) {
+                signals.push({
+                    type: 'podcastListing',
+                    count: podcastEls.length || schemaAudio.length,
+                    confidence: 0.85,
+                    reasoning: `Podcast listing: ${podcastEls.length || schemaAudio.length} episodes with structured audio metadata`
+                });
+            }
+
             // Return highest confidence signal
             if (signals.length > 0) {
                 signals.sort((a, b) => b.confidence - a.confidence);
@@ -277,6 +318,42 @@ class IntelligentContentExtractor:
                 };
             }""")
 
+        elif page_type == PageType.AUDIO_STREAM:
+            return await self.page.evaluate("""() => {
+                return {
+                    audioPlayers: document.querySelectorAll('audio, [data-player], [data-stream], .player').length,
+                    liveIndicators: document.querySelectorAll('.live, .livestream, .on-air, [data-live]').length,
+                    channels: document.querySelectorAll('.channel, [data-channel]').length,
+                    scheduleItems: document.querySelectorAll('.schedule, [data-schedule], .timetable, .programming').length,
+                    playButtons: document.querySelectorAll('[class*="play"], button[aria-label*="play"]').length,
+                    trackInfo: document.querySelectorAll('.now-playing, .tracklist, .track-info, .currently-playing').length
+                };
+            }""")
+
+        elif page_type == PageType.SHOW_ARCHIVE:
+            return await self.page.evaluate("""() => {
+                return {
+                    shows: document.querySelectorAll('.show, .mix, [data-mix], .broadcast, .episode').length,
+                    playButtons: document.querySelectorAll('[class*="play"], button[aria-label*="play"]').length,
+                    durations: document.querySelectorAll('.duration, [class*="duration"], time[datetime]').length,
+                    hosts: document.querySelectorAll('.host, .dj, .artist, [class*="artist"]').length,
+                    genres: document.querySelectorAll('.genre, .tag, [class*="genre"]').length,
+                    dates: document.querySelectorAll('time, .date, [class*="date"]').length
+                };
+            }""")
+
+        elif page_type == PageType.PODCAST_LISTING:
+            return await self.page.evaluate("""() => {
+                return {
+                    episodes: document.querySelectorAll('.episode, [data-episode], .podcast-episode').length,
+                    audioPlayers: document.querySelectorAll('audio, [data-player]').length,
+                    durations: document.querySelectorAll('.duration, [class*="duration"], time[datetime]').length,
+                    dates: document.querySelectorAll('time, .date').length,
+                    descriptions: document.querySelectorAll('.description, .summary, .episode-description').length,
+                    subscribeButtons: document.querySelectorAll('[class*="subscribe"], [class*="follow"]').length
+                };
+            }""")
+
         else:
             return {}
 
@@ -363,6 +440,54 @@ class IntelligentContentExtractor:
                 }));
             }""")
 
+        elif page_type == PageType.AUDIO_STREAM:
+            return await self.page.evaluate("""() => {
+                const players = Array.from(
+                    document.querySelectorAll('audio, [data-player], [data-stream], .player')
+                ).slice(0, 3);
+                return players.map((p, idx) => ({
+                    type: p.tagName === 'AUDIO' ? 'audio element' : 'player widget',
+                    src: p.src || p.getAttribute('data-src') || p.querySelector('source')?.src || null,
+                    hasControls: p.hasAttribute('controls') || !!p.querySelector('[class*="play"]'),
+                    nowPlaying: p.closest('[class*="player"]')?.querySelector('.now-playing, .track-info, .currently-playing')?.innerText?.trim()?.slice(0, 100),
+                    isLive: !!p.closest('[class*="live"]') || !!document.querySelector('.live, .on-air'),
+                    selector: `audio:nth-of-type(${idx + 1})`
+                }));
+            }""")
+
+        elif page_type == PageType.SHOW_ARCHIVE:
+            return await self.page.evaluate("""() => {
+                const shows = Array.from(
+                    document.querySelectorAll('.show, .mix, [data-mix], .broadcast, .episode')
+                ).slice(0, 5);
+                return shows.map((s, idx) => ({
+                    title: s.querySelector('.title, h3, h4, h2, a')?.innerText?.trim(),
+                    host: s.querySelector('.host, .dj, .artist, [class*="artist"]')?.innerText?.trim(),
+                    duration: s.querySelector('.duration, [class*="duration"]')?.innerText?.trim(),
+                    date: s.querySelector('time, .date, [class*="date"]')?.innerText?.trim(),
+                    genre: s.querySelector('.genre, .tag, [class*="genre"]')?.innerText?.trim(),
+                    hasPlayButton: !!s.querySelector('[class*="play"]'),
+                    link: s.querySelector('a')?.href,
+                    selector: `.show:nth-child(${idx + 1})`
+                }));
+            }""")
+
+        elif page_type == PageType.PODCAST_LISTING:
+            return await self.page.evaluate("""() => {
+                const episodes = Array.from(
+                    document.querySelectorAll('.episode, [data-episode], .podcast-episode')
+                ).slice(0, 5);
+                return episodes.map((ep, idx) => ({
+                    title: ep.querySelector('.title, h3, h4, h2')?.innerText?.trim(),
+                    description: ep.querySelector('.description, .summary, p')?.innerText?.trim()?.slice(0, 150),
+                    duration: ep.querySelector('.duration, [class*="duration"], time')?.innerText?.trim(),
+                    date: ep.querySelector('time, .date')?.innerText?.trim(),
+                    hasAudio: !!ep.querySelector('audio, [data-player]'),
+                    link: ep.querySelector('a')?.href,
+                    selector: `.episode:nth-child(${idx + 1})`
+                }));
+            }""")
+
         else:
             return []
 
@@ -434,6 +559,43 @@ class IntelligentContentExtractor:
                     '✅ Consistent structure across items',
                     '⚠️ Some items missing duration data',
                     '✅ Play buttons detected'
+                ]
+            },
+            PageType.AUDIO_STREAM: {
+                'primary_selector': 'audio, [data-player], [data-stream]',
+                'fallback_selector': '.player, .stream',
+                'confidence': 'high',
+                'reasoning': 'Live audio stream detected via HTML5 audio elements and player widgets',
+                'fields_extracted': ['type', 'src', 'nowPlaying', 'isLive', 'hasControls'],
+                'validation': [
+                    '✅ HTML5 <audio> element or player widget found',
+                    '✅ Live/schedule indicators present',
+                    '⚠️ Stream content is dynamic (initial state only captured)'
+                ],
+                'scaling_note': 'Audio streams are stateful — full tracklist requires polling or WebSocket monitoring'
+            },
+            PageType.SHOW_ARCHIVE: {
+                'primary_selector': '.show, .mix, [data-mix], .broadcast',
+                'fallback_selector': '.episode, [data-show]',
+                'confidence': 'medium',
+                'reasoning': 'Show/mix archive with repeated content cards and audio presence',
+                'fields_extracted': ['title', 'host', 'duration', 'date', 'genre'],
+                'validation': [
+                    '✅ Consistent show card structure',
+                    '✅ Audio playback elements detected',
+                    '⚠️ Some metadata may load dynamically'
+                ]
+            },
+            PageType.PODCAST_LISTING: {
+                'primary_selector': '.episode, [data-episode], .podcast-episode',
+                'fallback_selector': '[itemtype*="PodcastEpisode"], [itemtype*="AudioObject"]',
+                'confidence': 'high',
+                'reasoning': 'Podcast episode listing with structured audio metadata',
+                'fields_extracted': ['title', 'description', 'duration', 'date', 'hasAudio'],
+                'validation': [
+                    '✅ Episode elements with consistent structure',
+                    '✅ Audio/player elements associated with episodes',
+                    '✅ Schema.org metadata detected'
                 ]
             }
         }

@@ -33,6 +33,9 @@ from screenshot_annotator import ScreenshotAnnotator
 from content_extractor import IntelligentContentExtractor
 from component_mapper import ComponentMapper
 from spatial_composition_analyzer import SpatialCompositionAnalyzer
+from extractors.base import ExtractionContext
+from extractors.cdp_animation_extractor import CdpAnimationExtractor
+from extractors.axe_contrast_extractor import AxeContrastExtractor
 
 # Import stealth mode for bot-protected sites
 try:
@@ -41,6 +44,37 @@ try:
 except ImportError:
     STEALTH_AVAILABLE = False
     print("⚠️  playwright-stealth not installed - bot detection bypass unavailable")
+
+
+# Focus-to-extractor mapping for Smart Nav focused scans.
+# Each focus maps to the set of evidence keys that should be extracted.
+# None = run everything (full mode).
+FOCUS_EXTRACTORS = {
+    'layout': {
+        'layout', 'dom_depth', 'site_architecture', 'interactive_elements', 'accessibility',
+        'visual_hierarchy', 'spatial_composition', 'component_map', 'content_extraction',
+        'responsive_breakpoints', 'z_index_stack',
+        'meta_info', 'llm_helper', 'architecture_diagrams',
+    },
+    'design': {
+        'typography', 'colors', 'css_tricks', 'animations',
+        'spacing_scale', 'responsive_breakpoints', 'shadow_system',
+        'z_index_stack', 'border_radius_scale',
+        'motion_tokens',
+        'meta_info', 'llm_helper',
+    },
+    'interaction': {
+        'animations', 'interactive_elements', 'interaction_states', 'css_tricks', 'api_patterns',
+        'motion_tokens', 'cdp_animations', 'contrast_a11y',
+        'meta_info', 'llm_helper',
+    },
+    'architecture': {
+        'site_architecture', 'api_patterns', 'performance', 'security', 'seo', 'third_party',
+        'content_extraction', 'component_map', 'architecture_diagrams',
+        'meta_info', 'llm_helper',
+    },
+    'full': None,
+}
 
 
 class DeepEvidenceEngine:
@@ -203,15 +237,336 @@ class DeepEvidenceEngine:
 
         return deep_link
 
+    # ── Interactive Discovery ────────────────────────────────────────────
+
+    async def _discover_interactive_links(self, page, base_url: str) -> Dict:
+        """
+        Click/hover through interactive navigation triggers on the current page
+        to reveal hidden links (dropdowns, hamburger menus, mega-menus).
+
+        Returns dict with static_links, interactive_links, interaction_log, and
+        a deduplicated all_links list.
+        """
+        from urllib.parse import urlparse
+        import asyncio as _aio
+
+        parsed_base = urlparse(base_url)
+        base_origin = f"{parsed_base.scheme}://{parsed_base.netloc}"
+
+        # Phase A: static baseline
+        static_result = await self._discover_links(page, base_url)
+        static_urls = set()
+        static_links = []
+        for link in static_result.get('all', []):
+            url = link.get('url', link) if isinstance(link, dict) else link
+            if url and url not in static_urls:
+                static_urls.add(url)
+                static_links.append({'url': url, 'text': link.get('text', '') if isinstance(link, dict) else '', 'source': 'static'})
+
+        # Phase B: find interactive triggers in nav/header
+        triggers = await page.evaluate("""
+            () => {
+                const results = [];
+                const seen = new Set();
+                const navAreas = document.querySelectorAll('nav, header, [role="navigation"]');
+                if (navAreas.length === 0) return results;
+
+                const selectors = [
+                    // ARIA triggers
+                    '[aria-haspopup="menu"]',
+                    '[aria-haspopup="true"]',
+                    '[aria-expanded="false"]',
+                    // Semantic triggers
+                    'button',
+                    '[role="button"]',
+                    'details > summary',
+                    // Class-based triggers
+                    '[class*="dropdown-toggle"]',
+                    '[class*="dropdown-trigger"]',
+                    '[class*="hamburger"]',
+                    '[class*="mobile-nav"]',
+                    '[class*="menu-toggle"]',
+                    '[class*="nav-toggle"]',
+                ];
+
+                for (const area of navAreas) {
+                    for (const sel of selectors) {
+                        for (const el of area.querySelectorAll(sel)) {
+                            // Skip <a> with real href UNLESS it also has aria-haspopup/aria-expanded
+                            // (many sites use <a href="/products" aria-haspopup="menu"> for dropdown triggers)
+                            if (el.tagName === 'A' && el.href && !el.href.startsWith('javascript:') && el.href !== '#') {
+                                if (!el.getAttribute('aria-haspopup') && el.getAttribute('aria-expanded') === null) continue;
+                            }
+                            // Skip invisible elements
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width === 0 && rect.height === 0) continue;
+
+                            // Build a unique CSS selector for this element
+                            let uid = '';
+                            const nthIdx = Array.from(el.parentNode.children).indexOf(el) + 1;
+                            if (el.id) {
+                                uid = '#' + el.id;
+                            } else if (el.getAttribute('aria-label')) {
+                                uid = `[aria-label="${el.getAttribute('aria-label')}"]`;
+                            } else {
+                                // Use nth-child for uniqueness since class alone may match siblings
+                                const parent = el.parentNode;
+                                const parentSel = parent.id ? '#' + parent.id
+                                    : parent.tagName.toLowerCase() + ':nth-child(' + (Array.from(parent.parentNode?.children || []).indexOf(parent) + 1) + ')';
+                                uid = parentSel + ' > ' + el.tagName.toLowerCase() + ':nth-child(' + nthIdx + ')';
+                            }
+
+                            if (seen.has(uid)) continue;
+                            seen.add(uid);
+
+                            results.push({
+                                selector: uid,
+                                text: (el.textContent || '').trim().substring(0, 50),
+                                tagName: el.tagName,
+                                hasPopup: el.getAttribute('aria-haspopup') || null,
+                                expanded: el.getAttribute('aria-expanded') || null
+                            });
+                        }
+                    }
+                }
+                return results.slice(0, 20);  // Cap at 20 triggers
+            }
+        """)
+
+        print(f"   🔍 Found {len(triggers)} interactive navigation triggers")
+
+        interactive_links = []
+        interaction_log = []
+
+        # Phase C: click each trigger and collect newly-visible links
+        async def _click_and_collect():
+            for trigger in triggers:
+                sel = trigger['selector']
+                label = trigger['text'] or sel
+                try:
+                    # Snapshot current VISIBLE hrefs (checks offsetParent + visibility)
+                    before = set(await page.evaluate("""
+                        () => Array.from(document.querySelectorAll('a[href]'))
+                            .filter(a => {
+                                const r = a.getBoundingClientRect();
+                                const s = getComputedStyle(a);
+                                return r.width > 0 && r.height > 0 &&
+                                       s.visibility !== 'hidden' && s.opacity !== '0';
+                            })
+                            .map(a => a.href)
+                            .filter(h => h.startsWith(window.location.origin))
+                    """))
+
+                    # Try hover first (many mega-menus are hover-triggered), then click
+                    try:
+                        await page.hover(sel, timeout=2000)
+                    except Exception:
+                        try:
+                            await page.click(sel, timeout=2000)
+                        except Exception:
+                            continue
+
+                    # Wait for CSS transition / menu reveal
+                    await _aio.sleep(0.4)
+
+                    # Optionally wait for aria-expanded="true"
+                    try:
+                        await page.wait_for_selector('[aria-expanded="true"]', timeout=300)
+                    except Exception:
+                        pass
+
+                    # Snapshot VISIBLE hrefs again and diff (catches CSS-hidden→visible)
+                    after = set(await page.evaluate("""
+                        () => Array.from(document.querySelectorAll('a[href]'))
+                            .filter(a => {
+                                const r = a.getBoundingClientRect();
+                                const s = getComputedStyle(a);
+                                return r.width > 0 && r.height > 0 &&
+                                       s.visibility !== 'hidden' && s.opacity !== '0';
+                            })
+                            .map(a => a.href)
+                            .filter(h => h.startsWith(window.location.origin))
+                    """))
+
+                    new_urls = after - before
+                    if new_urls:
+                        # Get text labels for new links
+                        link_texts = await page.evaluate("""
+                            (urls) => {
+                                const map = {};
+                                for (const a of document.querySelectorAll('a[href]')) {
+                                    if (urls.includes(a.href)) {
+                                        map[a.href] = (a.textContent || '').trim().substring(0, 80);
+                                    }
+                                }
+                                return map;
+                            }
+                        """, list(new_urls))
+
+                        for url in new_urls:
+                            if url not in static_urls:
+                                interactive_links.append({
+                                    'url': url,
+                                    'text': (link_texts or {}).get(url, ''),
+                                    'source': f'dropdown:{label[:30]}'
+                                })
+                        interaction_log.append({
+                            'trigger': sel,
+                            'label': label[:50],
+                            'action': 'hover',
+                            'links_found': len(new_urls)
+                        })
+                        print(f"      ▸ {label[:30]}: {len(new_urls)} new links")
+
+                    # Close the revealed menu
+                    try:
+                        await page.keyboard.press('Escape')
+                        await _aio.sleep(0.15)
+                    except Exception:
+                        pass
+
+                except Exception as e:
+                    print(f"      ⚠ Trigger {sel[:40]} failed: {str(e)[:40]}")
+                    continue
+
+        # Wrap in 30s timeout
+        try:
+            await _aio.wait_for(_click_and_collect(), timeout=30)
+        except _aio.TimeoutError:
+            print("   ⏱  Interactive discovery hit 30s timeout")
+
+        # Deduplicate all links
+        all_urls = set()
+        all_links = []
+        for link in static_links + interactive_links:
+            if link['url'] not in all_urls:
+                all_urls.add(link['url'])
+                all_links.append(link)
+
+        print(f"   📊 Discovery: {len(static_links)} static + {len(interactive_links)} interactive = {len(all_links)} unique")
+
+        return {
+            'static_links': static_links,
+            'interactive_links': interactive_links,
+            'interaction_log': interaction_log,
+            'all_links': all_links,
+            'total_static': len(static_links),
+            'total_interactive': len(interactive_links),
+            'total_unique': len(all_links)
+        }
+
+    # ── URL Diversity Scoring ────────────────────────────────────────────
+
+    def _score_url_diversity(self, urls: List[str], base_url: str) -> List[Dict]:
+        """
+        Score URLs by path diversity to enable intelligent page selection.
+        Returns list sorted by diversity_score descending.
+        """
+        from urllib.parse import urlparse
+        import re
+
+        parsed_base = urlparse(base_url)
+        scored = []
+
+        # Group by first path segment
+        segment_counts = {}
+        for url in urls:
+            parsed = urlparse(url)
+            segments = [s for s in parsed.path.split('/') if s]
+            first_seg = segments[0] if segments else '_root'
+            segment_counts[first_seg] = segment_counts.get(first_seg, 0) + 1
+
+        total_urls = len(urls)
+
+        for url in urls:
+            parsed = urlparse(url)
+            if parsed.netloc != parsed_base.netloc:
+                continue  # Skip external
+
+            segments = [s for s in parsed.path.split('/') if s]
+            first_seg = segments[0] if segments else '_root'
+            depth = len(segments)
+
+            # Score components
+            # 1. Segment uniqueness: fewer URLs sharing this first segment = higher score
+            group_size = segment_counts.get(first_seg, 1)
+            uniqueness = 1.0 - (group_size / max(total_urls, 1))
+
+            # 2. Depth bonus: deeper pages are more interesting (but diminishing returns)
+            depth_score = min(depth / 4.0, 1.0)
+
+            # 3. Pattern distinctness: slug-like final segments = instance page
+            is_instance = bool(segments and re.search(r'[-_\d]', segments[-1]))
+            is_listing = depth <= 2 and not is_instance
+
+            # Prefer a mix: both listing and instance pages
+            pattern_bonus = 0.1 if is_listing else 0.0
+
+            diversity_score = (uniqueness * 0.5) + (depth_score * 0.3) + (pattern_bonus * 0.2)
+
+            scored.append({
+                'url': url,
+                'path_segments': segments,
+                'depth': depth,
+                'template_group': first_seg,
+                'is_instance': is_instance,
+                'diversity_score': round(diversity_score, 3)
+            })
+
+        scored.sort(key=lambda x: x['diversity_score'], reverse=True)
+        return scored
+
+    def _select_diverse_pages(self, urls: List[str], base_url: str, max_pages: int = 5) -> Dict[str, str]:
+        """
+        Pick max_pages diverse URLs from the pool using greedy set-cover.
+        Always includes base_url as 'home'.
+        """
+        result = {'home': base_url}
+        remaining = [u for u in urls if u.rstrip('/') != base_url.rstrip('/')]
+
+        if not remaining:
+            return result
+
+        scored = self._score_url_diversity(remaining, base_url)
+        if not scored:
+            return result
+
+        selected_groups = set()
+        page_num = 1
+
+        for candidate in scored:
+            if page_num >= max_pages:
+                break
+
+            # Penalize candidates whose template_group is already represented
+            group = candidate['template_group']
+            if group in selected_groups:
+                # Still allow if nothing else is left, but skip if we have options
+                remaining_unique = [s for s in scored
+                                   if s['template_group'] not in selected_groups
+                                   and s['url'] not in result.values()]
+                if remaining_unique:
+                    continue
+
+            if candidate['url'] not in result.values():
+                result[f'page_{page_num}'] = candidate['url']
+                selected_groups.add(group)
+                page_num += 1
+
+        return result
+
     async def _smart_nav_sample(self, page, base_url: str) -> Dict[str, str]:
         """
-        Universal 3-point sampling via navigation
+        Diversity-based 3-point sampling via navigation.
+
+        Discovers nav links (with optional lightweight interactive discovery),
+        then selects the 3 most diverse pages by URL path structure.
 
         Returns:
             {
                 'home': 'https://site.com',
                 'nav_1': 'https://site.com/products',
-                'nav_2': 'https://site.com/products/item-123'
+                'nav_2': 'https://site.com/docs'
             }
         """
         print("   🧭 Discovering navigation structure...")
@@ -220,42 +575,142 @@ class DeepEvidenceEngine:
         await page.goto(base_url, wait_until='domcontentloaded', timeout=30000)
         await asyncio.sleep(2)
 
-        # Discover nav links
+        # Discover visible nav links
         nav_links = await self._discover_nav_links(page, base_url)
 
-        if len(nav_links) == 0:
+        # Lightweight interactive pass: click up to 5 nav triggers to augment pool
+        try:
+            quick_triggers = await page.evaluate("""
+                () => {
+                    const navArea = document.querySelector('nav') || document.querySelector('header');
+                    if (!navArea) return [];
+                    const triggers = navArea.querySelectorAll(
+                        '[aria-haspopup="menu"], [aria-haspopup="true"], [aria-expanded="false"], ' +
+                        'button[class*="dropdown"], [class*="dropdown-toggle"]'
+                    );
+                    return Array.from(triggers).slice(0, 5).map(el => {
+                        if (el.id) return '#' + el.id;
+                        if (el.getAttribute('aria-label')) return '[aria-label="' + el.getAttribute('aria-label') + '"]';
+                        if (el.className && typeof el.className === 'string')
+                            return el.tagName.toLowerCase() + '.' + el.className.trim().split(/\\s+/).join('.');
+                        return null;
+                    }).filter(Boolean);
+                }
+            """)
+
+            if quick_triggers:
+                print(f"   🔍 Quick interactive pass: {len(quick_triggers)} triggers")
+                for sel in quick_triggers[:5]:
+                    try:
+                        before = set(await page.evaluate(
+                            "() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href).filter(h => h.startsWith(window.location.origin))"
+                        ))
+                        await page.click(sel, timeout=2000)
+                        await asyncio.sleep(0.3)
+                        after = set(await page.evaluate(
+                            "() => Array.from(document.querySelectorAll('a[href]')).map(a => a.href).filter(h => h.startsWith(window.location.origin))"
+                        ))
+                        new_urls = after - before - set(nav_links)
+                        nav_links.extend(list(new_urls))
+                        if new_urls:
+                            print(f"      ▸ +{len(new_urls)} links from dropdown")
+                        await page.keyboard.press('Escape')
+                        await asyncio.sleep(0.15)
+                    except Exception:
+                        pass
+        except Exception:
+            pass  # Non-fatal — proceed with static nav links
+
+        if not nav_links:
             print("   ⚠️  No nav links found, using home page only")
             return {'home': base_url}
 
+        # Use diversity scoring to pick 3 best pages
+        selected = self._select_diverse_pages(nav_links, base_url, max_pages=3)
+
+        # Rename keys to nav_1/nav_2 for backward compatibility
         result = {'home': base_url}
+        for key, url in selected.items():
+            if key == 'home':
+                continue
+            idx = len(result)
+            result[f'nav_{idx}'] = url
 
-        # Point 2: First nav link
-        if len(nav_links) >= 1:
-            nav_1 = nav_links[0]
-            print(f"   📍 Nav 1: {nav_1}")
-            result['nav_1'] = nav_1
-
-            # Try to find a deep link from nav_1
-            try:
-                await page.goto(nav_1, wait_until='domcontentloaded', timeout=30000)
-                await asyncio.sleep(2)
-
-                deep = await self._discover_deep_link(page, nav_1)
-                if deep:
-                    print(f"   📍 Deep: {deep}")
-                    result['nav_2'] = deep
-                elif len(nav_links) >= 2:
-                    # Fall back to second nav link
-                    print(f"   📍 Nav 2: {nav_links[1]}")
-                    result['nav_2'] = nav_links[1]
-            except Exception as e:
-                print(f"   ⚠️  Nav 1 exploration failed: {str(e)[:50]}")
-                if len(nav_links) >= 2:
-                    result['nav_2'] = nav_links[1]
+        for label, url in result.items():
+            if label != 'home':
+                print(f"   📍 {label}: {url}")
 
         return result
 
-    async def _analyze_single_page(self, page, url: str, html_content: str) -> Dict:
+    async def multi_scan(self, urls: List[str], analysis_focus: str = 'full') -> Dict:
+        """
+        Analyze an explicit list of URLs (for /api/multi-scan endpoint).
+        Uses one browser session, analyzes each page, then synthesizes.
+
+        Args:
+            urls: List of URLs to analyze
+            analysis_focus: 'full'|'layout'|'design'|'interaction'|'architecture' — controls which extractors run
+        """
+        from patchright.async_api import async_playwright
+
+        print(f"\n{'='*70}")
+        print(f" 🔍 MULTI-SCAN: {len(urls)} pages")
+        print('='*70)
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            page = await context.new_page()
+            page.set_default_timeout(60000)
+
+            # Initialize network monitoring (required by _analyze_api_patterns, _extract_performance, etc.)
+            self.network_requests = []
+            self.network_responses = []
+            page.on('request', lambda req: self.network_requests.append({
+                'url': req.url,
+                'method': req.method,
+                'resource_type': req.resource_type,
+                'headers': dict(req.headers)
+            }))
+            page.on('response', lambda resp: self.network_responses.append({
+                'url': resp.url,
+                'status': resp.status,
+                'headers': dict(resp.headers)
+            }))
+
+            page_results = {}
+            for idx, url in enumerate(urls):
+                label = 'home' if idx == 0 else f'page_{idx}'
+                print(f"\n   📄 [{idx + 1}/{len(urls)}] Analyzing: {url}")
+
+                # Reset network tracking per page
+                self.network_requests = []
+                self.network_responses = []
+
+                try:
+                    await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                    await asyncio.sleep(2)
+                    html_content = await page.content()
+                    page_results[label] = await self._analyze_single_page(page, url, html_content, analysis_focus=analysis_focus)
+                    print(f"   ✅ {label} complete — {len(page_results[label])} evidence keys (focus: {analysis_focus})")
+                except Exception as e:
+                    print(f"   ❌ {label} failed: {str(e)[:60]}")
+                    page_results[label] = {
+                        'error': str(e)[:200],
+                        'meta_info': {'url': url, 'access_strategy': 'failed'}
+                    }
+
+            await browser.close()
+
+        # Synthesize cross-page patterns
+        synthesis = self._synthesize_multi_page(page_results, mode='interactive')
+        synthesis['urls_discovered'] = {label: url for label, url in zip(page_results.keys(), urls)}
+        return synthesis
+
+    async def _analyze_single_page(self, page, url: str, html_content: str, analysis_focus: str = 'full') -> Dict:
         """
         Analyze a single page (core extraction logic)
 
@@ -263,6 +718,7 @@ class DeepEvidenceEngine:
             page: Playwright page object
             url: URL being analyzed
             html_content: HTML content of the page
+            analysis_focus: 'full'|'layout'|'design'|'interaction'|'architecture' — controls which extractors run
 
         Returns:
             Dict with all metrics for this page
@@ -288,56 +744,85 @@ class DeepEvidenceEngine:
                     'error': str(e)[:200]
                 }
 
-        # Extract each metric safely
-        evidence['layout'] = await safe_extract('Layout', self._extract_layout, page)
-        evidence['typography'] = await safe_extract('Typography', self._extract_typography, page)
-        evidence['colors'] = await safe_extract('Colors', self._extract_colors, page)
-        evidence['animations'] = await safe_extract('Animations', self._extract_animations, page)
-        evidence['accessibility'] = await safe_extract('Accessibility', self._extract_accessibility, page)
-        evidence['performance'] = await safe_extract('Performance', self._extract_performance, page)
-        evidence['dom_depth'] = await safe_extract('DOM Depth', self._extract_dom_depth, page)
-        evidence['seo'] = await safe_extract('SEO', self._extract_seo, page)
-        evidence['security'] = await safe_extract('Security', self._extract_security, page)
-        evidence['api_patterns'] = await safe_extract('API Patterns', self._analyze_api_patterns)
-        evidence['site_architecture'] = await safe_extract('Site Architecture', self._extract_site_architecture, page)
-        evidence['css_tricks'] = await safe_extract('CSS Tricks', self._extract_css_tricks, page)
-        evidence['interactive_elements'] = await safe_extract('Interactive', self._extract_interactive_elements, page)
-        evidence['interaction_states'] = await safe_extract('Interaction States', self._extract_interaction_states, page)
-        evidence['third_party'] = await safe_extract('Third Party', self._analyze_third_party)
+        # Focus gating: skip extractors not relevant to the selected focus
+        _focus_keys = FOCUS_EXTRACTORS.get(analysis_focus)
+        def _should_extract(key):
+            return _focus_keys is None or key in _focus_keys
+
+        # Extract each metric safely — gated by focus
+        if _should_extract('layout'):
+            evidence['layout'] = await safe_extract('Layout', self._extract_layout, page)
+        if _should_extract('typography'):
+            evidence['typography'] = await safe_extract('Typography', self._extract_typography, page)
+        if _should_extract('colors'):
+            evidence['colors'] = await safe_extract('Colors', self._extract_colors, page)
+        if _should_extract('animations'):
+            evidence['animations'] = await safe_extract('Animations', self._extract_animations, page)
+        if _should_extract('accessibility'):
+            evidence['accessibility'] = await safe_extract('Accessibility', self._extract_accessibility, page)
+        if _should_extract('performance'):
+            evidence['performance'] = await safe_extract('Performance', self._extract_performance, page)
+        if _should_extract('dom_depth'):
+            evidence['dom_depth'] = await safe_extract('DOM Depth', self._extract_dom_depth, page)
+        if _should_extract('seo'):
+            evidence['seo'] = await safe_extract('SEO', self._extract_seo, page)
+        if _should_extract('security'):
+            evidence['security'] = await safe_extract('Security', self._extract_security, page)
+        if _should_extract('api_patterns'):
+            evidence['api_patterns'] = await safe_extract('API Patterns', self._analyze_api_patterns)
+        if _should_extract('site_architecture'):
+            evidence['site_architecture'] = await safe_extract('Site Architecture', self._extract_site_architecture, page)
+        if _should_extract('css_tricks'):
+            evidence['css_tricks'] = await safe_extract('CSS Tricks', self._extract_css_tricks, page)
+        if _should_extract('interactive_elements'):
+            evidence['interactive_elements'] = await safe_extract('Interactive', self._extract_interactive_elements, page)
+        if _should_extract('interaction_states'):
+            evidence['interaction_states'] = await safe_extract('Interaction States', self._extract_interaction_states, page)
+        if _should_extract('third_party'):
+            evidence['third_party'] = await safe_extract('Third Party', self._analyze_third_party)
+        # article_content is lightweight — always extract
         evidence['article_content'] = await safe_extract('Articles', self._extract_article_content, page)
 
         # Intelligent Content Extraction
-        print("   📄 Extracting content with classification...")
-        content_extractor = IntelligentContentExtractor(page)
-        extraction_result = await safe_extract('Content Extraction', content_extractor.extract)
+        if _should_extract('content_extraction'):
+            print("   📄 Extracting content with classification...")
+            content_extractor = IntelligentContentExtractor(page)
+            extraction_result = await safe_extract('Content Extraction', content_extractor.extract)
 
-        if extraction_result and isinstance(extraction_result, dict) and extraction_result.get('error'):
-            evidence['content_extraction'] = extraction_result
-        elif extraction_result and hasattr(extraction_result, 'page_type'):
-            evidence['content_extraction'] = {
-                'page_type': extraction_result.page_type.value if hasattr(extraction_result.page_type, 'value') else str(extraction_result.page_type),
-                'confidence': extraction_result.confidence,
-                'reasoning': extraction_result.reasoning,
-                'content_inventory': extraction_result.content_inventory,
-                'samples': extraction_result.samples,
-                'extraction_strategy': extraction_result.extraction_strategy,
-                'excluded_elements': extraction_result.excluded_elements,
-                'semantic_analysis': extraction_result.semantic_analysis
-            }
-        else:
-            evidence['content_extraction'] = {
-                'error': 'Content extraction returned unexpected result',
-                'result': str(extraction_result)
-            }
+            if extraction_result and isinstance(extraction_result, dict) and extraction_result.get('error'):
+                evidence['content_extraction'] = extraction_result
+            elif extraction_result and hasattr(extraction_result, 'page_type'):
+                evidence['content_extraction'] = {
+                    'page_type': extraction_result.page_type.value if hasattr(extraction_result.page_type, 'value') else str(extraction_result.page_type),
+                    'confidence': extraction_result.confidence,
+                    'reasoning': extraction_result.reasoning,
+                    'content_inventory': extraction_result.content_inventory,
+                    'samples': extraction_result.samples,
+                    'extraction_strategy': extraction_result.extraction_strategy,
+                    'excluded_elements': extraction_result.excluded_elements,
+                    'semantic_analysis': extraction_result.semantic_analysis
+                }
+            else:
+                evidence['content_extraction'] = {
+                    'error': 'Content extraction returned unexpected result',
+                    'result': str(extraction_result)
+                }
 
-        # Design System Metrics
-        print("\n🎨 Extracting Design System Metrics...")
-        design_metrics = DesignSystemMetrics(page)
-        evidence['spacing_scale'] = await safe_extract('Spacing Scale', design_metrics.extract_spacing_scale)
-        evidence['responsive_breakpoints'] = await safe_extract('Breakpoints', design_metrics.extract_responsive_breakpoints)
-        evidence['shadow_system'] = await safe_extract('Shadow System', design_metrics.extract_shadow_system)
-        evidence['z_index_stack'] = await safe_extract('Z-Index Stack', design_metrics.extract_z_index_stack)
-        evidence['border_radius_scale'] = await safe_extract('Border Radius', design_metrics.extract_border_radius_scale)
+        # Design System Metrics — gate each sub-metric individually
+        _any_design = any(_should_extract(k) for k in ('spacing_scale', 'responsive_breakpoints', 'shadow_system', 'z_index_stack', 'border_radius_scale'))
+        if _any_design:
+            print("\n🎨 Extracting Design System Metrics...")
+            design_metrics = DesignSystemMetrics(page)
+            if _should_extract('spacing_scale'):
+                evidence['spacing_scale'] = await safe_extract('Spacing Scale', design_metrics.extract_spacing_scale)
+            if _should_extract('responsive_breakpoints'):
+                evidence['responsive_breakpoints'] = await safe_extract('Breakpoints', design_metrics.extract_responsive_breakpoints)
+            if _should_extract('shadow_system'):
+                evidence['shadow_system'] = await safe_extract('Shadow System', design_metrics.extract_shadow_system)
+            if _should_extract('z_index_stack'):
+                evidence['z_index_stack'] = await safe_extract('Z-Index Stack', design_metrics.extract_z_index_stack)
+            if _should_extract('border_radius_scale'):
+                evidence['border_radius_scale'] = await safe_extract('Border Radius', design_metrics.extract_border_radius_scale)
 
         # Enrich with statistical fields
         print("\n📊 Enriching evidence with statistical fields...")
@@ -355,28 +840,50 @@ class DeepEvidenceEngine:
                 )
 
         # Visual Hierarchy Analysis
-        print("\n👁️  Analyzing Visual Hierarchy...")
-        hierarchy_analyzer = VisualHierarchyAnalyzer()
-        evidence['visual_hierarchy'] = await safe_extract('Visual Hierarchy', hierarchy_analyzer.analyze, page)
+        if _should_extract('visual_hierarchy'):
+            print("\n👁️  Analyzing Visual Hierarchy...")
+            hierarchy_analyzer = VisualHierarchyAnalyzer()
+            evidence['visual_hierarchy'] = await safe_extract('Visual Hierarchy', hierarchy_analyzer.analyze, page)
 
-        # Spatial Composition Analysis (NEW - fills the 50-60% gap)
-        print("\n🗺️  Analyzing Spatial Composition...")
-        spatial_analyzer = SpatialCompositionAnalyzer()
-        evidence['spatial_composition'] = await safe_extract('Spatial Composition', spatial_analyzer.analyze, page)
+            # Capture interactive states for top VH regions
+            if evidence.get('visual_hierarchy') and evidence['visual_hierarchy'].get('visual_weight_map'):
+                print("   ⚡ Capturing VH region interactive states...")
+                evidence['visual_hierarchy']['region_states'] = await self._capture_vh_region_states(
+                    page, evidence['visual_hierarchy']['visual_weight_map'][:5]
+                )
+
+        # Spatial Composition Analysis (fills the 50-60% gap)
+        if _should_extract('spatial_composition'):
+            print("\n🗺️  Analyzing Spatial Composition...")
+            spatial_analyzer = SpatialCompositionAnalyzer()
+            evidence['spatial_composition'] = await safe_extract('Spatial Composition', spatial_analyzer.analyze, page)
 
         # Motion Token Synthesis (transforms raw animations + interaction_states into reusable tokens)
-        print("\n🎬 Synthesizing Motion Tokens...")
-        from motion_token_synthesizer import MotionTokenSynthesizer
-        motion_synth = MotionTokenSynthesizer()
-        raw_keyframes = evidence.get('animations', {}).get('details', {}).get('keyframes', [])
-        evidence['motion_tokens'] = motion_synth.synthesize(
-            evidence.get('animations', {}),
-            evidence.get('interaction_states', {}),
-            raw_keyframes=raw_keyframes
-        )
+        if _should_extract('motion_tokens'):
+            print("\n🎬 Synthesizing Motion Tokens...")
+            from motion_token_synthesizer import MotionTokenSynthesizer
+            motion_synth = MotionTokenSynthesizer()
+            raw_keyframes = evidence.get('animations', {}).get('details', {}).get('keyframes', [])
+            evidence['motion_tokens'] = motion_synth.synthesize(
+                evidence.get('animations', {}),
+                evidence.get('interaction_states', {}),
+                raw_keyframes=raw_keyframes
+            )
 
-        # Screenshot with Annotations
-        if evidence.get('visual_hierarchy') and evidence['visual_hierarchy'].get('pattern'):
+        # CDP Animation Capture (runtime JS-driven animations — fills gap left by CSS-only extractor)
+        if _should_extract('cdp_animations'):
+            print("\n🎭 Capturing runtime animations via CDP...")
+            _cdp_ctx = ExtractionContext(page=page, url=url, html_content=html_content, evidence=evidence)
+            evidence['cdp_animations'] = await safe_extract('CDP Animations', CdpAnimationExtractor().extract, _cdp_ctx)
+
+        # Axe-core Contrast Audit (WCAG AA colour-contrast via injected axe)
+        if _should_extract('contrast_a11y'):
+            print("\n♿ Running axe-core contrast audit...")
+            _axe_ctx = ExtractionContext(page=page, url=url, html_content=html_content, evidence=evidence)
+            evidence['contrast_a11y'] = await safe_extract('Axe Contrast', AxeContrastExtractor().extract, _axe_ctx)
+
+        # Screenshot with Annotations — only if visual_hierarchy was extracted
+        if _should_extract('visual_hierarchy') and evidence.get('visual_hierarchy') and evidence['visual_hierarchy'].get('pattern'):
             print("\n📸 Capturing annotated screenshot...")
             screenshot_annotator = ScreenshotAnnotator()
             evidence['screenshot'] = await safe_extract(
@@ -388,9 +895,10 @@ class DeepEvidenceEngine:
             )
 
         # Component Map (SDK integration)
-        print("\n🗺️  Analyzing component structure...")
-        component_mapper = ComponentMapper()
-        evidence['component_map'] = component_mapper.analyze_page(html_content)
+        if _should_extract('component_map'):
+            print("\n🗺️  Analyzing component structure...")
+            component_mapper = ComponentMapper()
+            evidence['component_map'] = component_mapper.analyze_page(html_content)
 
         # Extract all links for LLM guidance
         print("\n🔗 Discovering navigation links...")
@@ -413,6 +921,10 @@ class DeepEvidenceEngine:
             'full_analysis_available': True
         }
 
+        # Architecture diagrams (Mermaid) — built from site_architecture evidence
+        if _should_extract('architecture_diagrams'):
+            evidence['architecture_diagrams'] = self._generate_architecture_diagrams(url, evidence)
+
         # LLM Helper - Suggest next steps for deeper analysis
         evidence['llm_helper'] = self._generate_llm_suggestions(
             url,
@@ -423,7 +935,7 @@ class DeepEvidenceEngine:
 
         return evidence
 
-    def _synthesize_multi_page(self, page_results: Dict[str, Dict]) -> Dict:
+    def _synthesize_multi_page(self, page_results: Dict[str, Dict], mode: str = 'smart-nav') -> Dict:
         """
         Combine insights from multiple pages into site-level understanding
 
@@ -433,19 +945,31 @@ class DeepEvidenceEngine:
                 'nav_1': {...evidence...},
                 'nav_2': {...evidence...}
             }
+            mode: 'smart-nav' or 'interactive'
 
         Returns:
             Synthesized evidence with patterns
         """
         synthesis = {
-            'analysis_mode': 'smart-nav',
+            'analysis_mode': mode,
             'pages_analyzed': len(page_results),
             'page_results': page_results,
             'site_patterns': {}
         }
 
+        # Safe nested get: handles None values at any level in the chain
+        def _sg(d, *keys, default=None):
+            """Safe get through nested dicts — returns default if any level is None."""
+            for k in keys:
+                if not isinstance(d, dict):
+                    return default
+                d = d.get(k)
+                if d is None:
+                    return default
+            return d
+
         # Pattern 1: Layout consistency
-        layouts = [p.get('layout', {}).get('pattern', 'unknown') for p in page_results.values() if not p.get('error')]
+        layouts = [_sg(p, 'layout', 'pattern', default='unknown') for p in page_results.values() if not p.get('error')]
         if layouts:
             all_same = len(set(layouts)) == 1
             synthesis['site_patterns']['layout_consistency'] = 'consistent' if all_same else 'varies by page'
@@ -453,7 +977,7 @@ class DeepEvidenceEngine:
 
         # Pattern 2: API usage across pages
         api_counts = {
-            label: len(p.get('api_patterns', {}).get('details', {}).get('rest_apis', []))
+            label: len(_sg(p, 'api_patterns', 'details', 'rest_apis', default=[]) or [])
             for label, p in page_results.items()
             if not p.get('error')
         }
@@ -494,7 +1018,7 @@ class DeepEvidenceEngine:
 
         # Pattern 6: Design system usage
         has_spacing = any(
-            p.get('spacing_scale', {}).get('confidence', 0) > 70
+            (p.get('spacing_scale') or {}).get('confidence', 0) > 70
             for p in page_results.values()
             if not p.get('error')
         )
@@ -518,72 +1042,72 @@ class DeepEvidenceEngine:
         if total > 0:
             # Has a database — any REST or GraphQL API calls
             n = _seen_on(lambda p: bool(
-                (p.get('api_patterns', {}).get('details', {}).get('rest_apis') or []) or
-                (p.get('api_patterns', {}).get('details', {}).get('graphql') or [])
+                (_sg(p, 'api_patterns', 'details', 'rest_apis', default=[]) or []) or
+                (_sg(p, 'api_patterns', 'details', 'graphql', default=[]) or [])
             ))
             validated['has_database'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Updates live — websockets or GraphQL subscriptions
             n = _seen_on(lambda p:
-                p.get('site_architecture', {}).get('details', {}).get('capabilities', {}).get('websockets', False) or
-                bool((p.get('api_patterns', {}).get('details', {}).get('graphql') or []))
+                _sg(p, 'site_architecture', 'details', 'capabilities', 'websockets', default=False) or
+                bool((_sg(p, 'api_patterns', 'details', 'graphql', default=[]) or []))
             )
             validated['updates_live'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Has user accounts — auth signals
             n = _seen_on(lambda p:
-                p.get('site_architecture', {}).get('details', {}).get('auth_detected', False) or
+                (p.get('site_architecture') or {}).get('details', {}).get('auth_detected', False) or
                 any(
                     any(kw in (ep.get('path') or '').lower() for kw in ['/auth', '/login', '/token', '/session', '/oauth'])
-                    for ep in (p.get('api_patterns', {}).get('relationship_map', {}).get('endpoints') or [])
+                    for ep in ((p.get('api_patterns') or {}).get('relationship_map') or {}).get('endpoints') or []
                 )
             )
             validated['has_user_accounts'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Tracks visitors — analytics third-party scripts
-            n = _seen_on(lambda p: bool(p.get('third_party', {}).get('details', {}).get('analytics')))
+            n = _seen_on(lambda p: bool(_sg(p, 'third_party', 'details', 'analytics')))
             validated['tracks_visitors'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Loads fast globally — CDN
-            n = _seen_on(lambda p: bool(p.get('third_party', {}).get('details', {}).get('cdns')))
+            n = _seen_on(lambda p: bool(_sg(p, 'third_party', 'details', 'cdns')))
             validated['loads_fast_globally'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Works offline — service worker
             n = _seen_on(lambda p:
-                p.get('site_architecture', {}).get('details', {}).get('capabilities', {}).get('service_worker', False)
+                _sg(p, 'site_architecture', 'details', 'capabilities', 'service_worker', default=False)
             )
             validated['works_offline'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Multiple languages — i18n
             n = _seen_on(lambda p:
-                p.get('site_architecture', {}).get('details', {}).get('capabilities', {}).get('i18n', False)
+                _sg(p, 'site_architecture', 'details', 'capabilities', 'i18n', default=False)
             )
             validated['multiple_languages'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Tests features — feature flags
             n = _seen_on(lambda p:
-                p.get('site_architecture', {}).get('details', {}).get('capabilities', {}).get('feature_flags', False)
+                _sg(p, 'site_architecture', 'details', 'capabilities', 'feature_flags', default=False)
             )
             validated['tests_features'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Publishes content — articles found
-            n = _seen_on(lambda p: bool(p.get('article_content', {}).get('articles')))
+            n = _seen_on(lambda p: bool(_sg(p, 'article_content', 'articles')))
             validated['publishes_content'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Collects input — forms or inputs detected
             n = _seen_on(lambda p: (
-                (p.get('interactive_elements', {}).get('counts', {}).get('forms') or 0) > 0 or
-                (p.get('interactive_elements', {}).get('counts', {}).get('inputs') or 0) > 0
+                (_sg(p, 'interactive_elements', 'counts', 'forms', default=0) or 0) > 0 or
+                (_sg(p, 'interactive_elements', 'counts', 'inputs', default=0) or 0) > 0
             ))
             validated['collects_input'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Shows ads — advertising scripts
-            n = _seen_on(lambda p: bool(p.get('third_party', {}).get('details', {}).get('advertising')))
+            n = _seen_on(lambda p: bool(_sg(p, 'third_party', 'details', 'advertising')))
             validated['shows_ads'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
             # Prefetches pages
             n = _seen_on(lambda p:
-                p.get('site_architecture', {}).get('details', {}).get('capabilities', {}).get('prefetching', False)
+                _sg(p, 'site_architecture', 'details', 'capabilities', 'prefetching', default=False)
             )
             validated['prefetches_pages'] = {'pages_seen': n, 'of': total, 'confirmed': n > total / 2}
 
@@ -1272,8 +1796,60 @@ class DeepEvidenceEngine:
                         }
 
                 # Synthesize multi-page insights
-                self.evidence = self._synthesize_multi_page(page_results)
+                self.evidence = self._synthesize_multi_page(page_results, mode='smart-nav')
                 self.evidence['urls_discovered'] = urls_to_analyze
+
+            elif self.analysis_mode == 'interactive':
+                # Interactive discovery: click menus, discover pages, select diverse subset, analyze
+                print(f"   🔍 Interactive discovery mode")
+
+                # Navigate to base URL first
+                await page.goto(self.url, wait_until='domcontentloaded', timeout=30000)
+                await asyncio.sleep(2)
+
+                # Phase 1: Discover all links (static + interactive)
+                discovery = await self._discover_interactive_links(page, self.url)
+
+                # Phase 2: Select diverse subset
+                all_urls = [l['url'] if isinstance(l, dict) else l for l in discovery['all_links']]
+                selected = self._select_diverse_pages(all_urls, self.url, max_pages=5)
+
+                # Phase 3: Analyze each selected page
+                page_results = {}
+                for idx, (label, url) in enumerate(selected.items(), 1):
+                    print(f"\n{'='*60}")
+                    print(f"📄 [{idx}/{len(selected)}] Analyzing {label}")
+                    print(f"{'='*60}")
+
+                    self.network_requests = []
+                    self.network_responses = []
+
+                    try:
+                        await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        await asyncio.sleep(3)
+                        html_content = await page.content()
+
+                        page_results[label] = await self._analyze_single_page(page, url, html_content)
+                        print(f"   ✅ {label} analysis complete")
+                    except Exception as e:
+                        error_msg = str(e)[:200]
+                        print(f"   ❌ Failed to analyze {label}: {error_msg}")
+                        page_results[label] = {
+                            'error': error_msg,
+                            'url': url,
+                            'layout': {'pattern': 'Analysis Failed', 'confidence': 0},
+                            'meta_info': {'url': url, 'error': error_msg}
+                        }
+
+                # Phase 4: Synthesize
+                self.evidence = self._synthesize_multi_page(page_results, mode='interactive')
+                self.evidence['urls_discovered'] = selected
+                self.evidence['discovery_metadata'] = {
+                    'total_discovered': discovery['total_unique'],
+                    'static_count': discovery['total_static'],
+                    'interactive_count': discovery['total_interactive'],
+                    'interaction_log': discovery['interaction_log'],
+                }
 
             await browser.close()
 
@@ -3281,6 +3857,127 @@ class DeepEvidenceEngine:
 
         return evidence
 
+    async def _capture_vh_region_states(self, page, top_regions: list) -> list:
+        """
+        Hover/focus the top VH-weighted regions to detect interactive states.
+
+        Returns list of {region_index, selector, tag, hover_delta, focus_delta,
+        transition, has_state_change} for each region.
+        """
+        from extractors.interaction_state_capture import STATE_PROPERTIES, _compute_delta
+
+        results = []
+        for idx, region in enumerate(top_regions):
+            # Build CSS selector from region data
+            sel = None
+            if region.get('id'):
+                sel = f"#{region['id']}"
+            elif region.get('className'):
+                first_cls = region['className'].strip().split()[0] if region['className'].strip() else None
+                if first_cls:
+                    sel = f"{region.get('tag', 'div')}.{first_cls}"
+            if not sel:
+                # Skip regions we can't reliably target
+                results.append({
+                    'region_index': idx, 'selector': None, 'tag': region.get('tag'),
+                    'hover_delta': {}, 'focus_delta': {}, 'transition': 'none',
+                    'has_state_change': False,
+                })
+                continue
+
+            hover_delta = {}
+            focus_delta = {}
+            transition = 'none'
+
+            try:
+                locator = page.locator(sel).first
+                if not await locator.is_visible(timeout=1000):
+                    results.append({
+                        'region_index': idx, 'selector': sel, 'tag': region.get('tag'),
+                        'hover_delta': {}, 'focus_delta': {}, 'transition': 'none',
+                        'has_state_change': False,
+                    })
+                    continue
+
+                # Read resting styles
+                resting = await page.evaluate('''(args) => {
+                    const el = document.querySelector(args.sel);
+                    if (!el) return null;
+                    const s = window.getComputedStyle(el);
+                    const out = {};
+                    for (const p of args.props) out[p] = s[p] || '';
+                    out._transition = s.transition || 'none';
+                    return out;
+                }''', {'sel': sel, 'props': STATE_PROPERTIES})
+
+                if not resting:
+                    results.append({
+                        'region_index': idx, 'selector': sel, 'tag': region.get('tag'),
+                        'hover_delta': {}, 'focus_delta': {}, 'transition': 'none',
+                        'has_state_change': False,
+                    })
+                    continue
+
+                transition = resting.pop('_transition', 'none')
+
+                # Hover
+                try:
+                    await locator.hover(timeout=2000)
+                    await page.wait_for_timeout(150)
+                    hover_styles = await page.evaluate('''(args) => {
+                        const el = document.querySelector(args.sel);
+                        if (!el) return null;
+                        const s = window.getComputedStyle(el);
+                        const out = {};
+                        for (const p of args.props) out[p] = s[p] || '';
+                        return out;
+                    }''', {'sel': sel, 'props': STATE_PROPERTIES})
+                    if hover_styles:
+                        hover_delta = _compute_delta(resting, hover_styles)
+                except Exception:
+                    pass
+
+                # Focus
+                try:
+                    await page.mouse.move(0, 0)
+                    await page.wait_for_timeout(100)
+                    await locator.focus(timeout=2000)
+                    await page.wait_for_timeout(100)
+                    focus_styles = await page.evaluate('''(args) => {
+                        const el = document.querySelector(args.sel);
+                        if (!el) return null;
+                        const s = window.getComputedStyle(el);
+                        const out = {};
+                        for (const p of args.props) out[p] = s[p] || '';
+                        return out;
+                    }''', {'sel': sel, 'props': STATE_PROPERTIES})
+                    if focus_styles:
+                        focus_delta = _compute_delta(resting, focus_styles)
+                    await page.evaluate('(sel) => { const el = document.querySelector(sel); if (el && el.blur) el.blur(); }', sel)
+                except Exception:
+                    pass
+
+            except Exception:
+                pass
+
+            results.append({
+                'region_index': idx,
+                'selector': sel,
+                'tag': region.get('tag'),
+                'hover_delta': hover_delta,
+                'focus_delta': focus_delta,
+                'transition': transition,
+                'has_state_change': bool(hover_delta or focus_delta),
+            })
+
+        # Reset mouse
+        try:
+            await page.mouse.move(0, 0)
+        except Exception:
+            pass
+
+        return results
+
     async def _discover_links(self, page, base_url: str) -> Dict:
         """
         Extract all links from the page and categorize them
@@ -3362,6 +4059,130 @@ class DeepEvidenceEngine:
         }''', base_url)
 
         return links_data
+
+    def _generate_architecture_diagrams(self, url: str, evidence: Dict) -> Dict:
+        """
+        Generate Mermaid diagram strings from site_architecture evidence.
+        Returns dict with 'site_structure' and optionally 'url_patterns' Mermaid source.
+        """
+        arch = evidence.get('site_architecture', {})
+        details = arch.get('details', {})
+
+        if not details:
+            return None
+
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.hostname or url
+
+        # Escape Mermaid special chars in labels
+        def esc(s):
+            return str(s).replace('"', "'").replace('[', '(').replace(']', ')')
+
+        # ── Site Structure Diagram ──
+        lines = ['graph TD']
+        site_id = 'Site'
+        lines.append(f'    {site_id}["{esc(domain)}"]')
+
+        node_idx = 0
+        def nid():
+            nonlocal node_idx
+            node_idx += 1
+            return f'N{node_idx}'
+
+        # Framework
+        fw = details.get('framework')
+        if fw and fw != 'vanilla / unknown':
+            n = nid()
+            lines.append(f'    {site_id} --> {n}["{esc(fw)}"]')
+            lines.append(f'    style {n} fill:#1a73e8,stroke:#fff,color:#fff')
+
+        # CSS Framework
+        css_fw = details.get('css_framework')
+        if css_fw:
+            n = nid()
+            lines.append(f'    {site_id} --> {n}["{esc(css_fw)}"]')
+            lines.append(f'    style {n} fill:#06b6d4,stroke:#fff,color:#fff')
+
+        # Bundler
+        bundler = details.get('bundler')
+        if bundler:
+            n = nid()
+            lines.append(f'    {site_id} --> {n}["{esc(bundler)}"]')
+            lines.append(f'    style {n} fill:#f59e0b,stroke:#fff,color:#000')
+
+        # State Management
+        state = details.get('state_mgmt')
+        if state:
+            n = nid()
+            lines.append(f'    {site_id} --> {n}["{esc(state)}"]')
+            lines.append(f'    style {n} fill:#8b5cf6,stroke:#fff,color:#fff')
+
+        # Router Type
+        router = details.get('router_type')
+        if router:
+            n = nid()
+            lines.append(f'    {site_id} --> {n}["Router: {esc(router)}"]')
+
+        # Capabilities as a subgroup
+        caps = details.get('capabilities', {})
+        active_caps = [k.replace('_', ' ').title() for k, v in caps.items() if v]
+        if active_caps:
+            cap_id = nid()
+            lines.append(f'    {site_id} --> {cap_id}["Capabilities"]')
+            lines.append(f'    style {cap_id} fill:#10b981,stroke:#fff,color:#fff')
+            for cap in active_caps[:6]:
+                cn = nid()
+                lines.append(f'    {cap_id} --> {cn}["{esc(cap)}"]')
+
+        site_structure = '\n'.join(lines)
+
+        # ── URL Pattern Diagram (from url_patterns evidence if available) ──
+        url_patterns_mermaid = None
+        url_pats = evidence.get('url_patterns', {})
+        pat_details = url_pats.get('details', {}) if isinstance(url_pats, dict) else {}
+        all_urls = pat_details.get('all', []) if isinstance(pat_details, dict) else []
+
+        if all_urls and len(all_urls) > 1:
+            url_lines = ['graph LR']
+            root_id = 'ROOT'
+            url_lines.append(f'    {root_id}["/"]')
+
+            # Build path tree from URL paths
+            path_tree = {}
+            for u in all_urls[:30]:  # Cap at 30 to keep diagram readable
+                try:
+                    p = urlparse(u) if u.startswith('http') else urlparse(url + u)
+                    path = p.path.strip('/')
+                    if not path:
+                        continue
+                    segments = path.split('/')
+                    node = path_tree
+                    for seg in segments[:4]:  # Max depth 4
+                        if seg not in node:
+                            node[seg] = {}
+                        node = node[seg]
+                except Exception:
+                    continue
+
+            # Convert tree to Mermaid edges
+            def tree_to_mermaid(tree, parent_id, depth=0):
+                for seg, children in tree.items():
+                    n = nid()
+                    url_lines.append(f'    {parent_id} --> {n}["/{esc(seg)}"]')
+                    if depth < 3:
+                        tree_to_mermaid(children, n, depth + 1)
+
+            tree_to_mermaid(path_tree, root_id)
+
+            if len(url_lines) > 2:
+                url_patterns_mermaid = '\n'.join(url_lines)
+
+        result = {'site_structure': site_structure}
+        if url_patterns_mermaid:
+            result['url_patterns'] = url_patterns_mermaid
+
+        return result
 
     def _generate_llm_suggestions(self, url: str, links: Dict, content: Dict, components: Dict) -> Dict:
         """

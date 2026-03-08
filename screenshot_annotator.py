@@ -22,7 +22,8 @@ class ScreenshotAnnotator:
     """
 
     def __init__(self):
-        self.screenshot_dir = Path("screenshots")
+        # Hidden dir — one file per domain, always overwritten. Never accumulates.
+        self.screenshot_dir = Path(".screenshots")
         self.screenshot_dir.mkdir(exist_ok=True)
 
     async def capture_and_annotate(self, page, visual_hierarchy: Dict, site_url: str) -> Dict:
@@ -46,7 +47,9 @@ class ScreenshotAnnotator:
 
         # Step 1: Capture clean screenshot (full page with scrolling)
         screenshot_bytes = await page.screenshot(full_page=True)
-        screenshot_path = self.screenshot_dir / f"screenshot_{hash(site_url)}.png"
+        from urllib.parse import urlparse
+        domain = urlparse(site_url).netloc.replace("www.", "") or "unknown"
+        screenshot_path = self.screenshot_dir / f"{domain}.png"
 
         # Save screenshot
         with open(screenshot_path, 'wb') as f:

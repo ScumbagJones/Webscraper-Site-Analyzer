@@ -13,8 +13,9 @@ Returns JSON blueprint + React/Tailwind boilerplate code
 """
 
 import asyncio
-from playwright.async_api import async_playwright
+from patchright.async_api import async_playwright
 import json
+import logging
 from typing import Dict, List, Optional
 
 
@@ -28,14 +29,19 @@ class ComponentRipper:
         self.selector = selector  # Specific component to rip (e.g., '.product-grid')
         self.blueprint = {}
 
-    async def rip(self, auth_state: Optional[str] = None, use_stealth: bool = False):
+    async def rip(self, auth_state: Optional[str] = None, use_stealth: bool = False,
+                  include_states: bool = False, output_format: str = 'json'):
         """
         Extract component blueprint with optional auth and stealth mode
 
         Args:
             auth_state: Path to saved auth state (for login walls)
             use_stealth: Enable stealth mode to bypass anti-bot measures
+            include_states: Capture hover/focus interactive state deltas
+            output_format: 'json' (default) or 'figma' (Tailwind JSX markdown)
         """
+        self._include_states = include_states
+        self._output_format = output_format
         if use_stealth:
             # Use stealth agent for protected sites
             from stealth_agent import StealthAgent
@@ -50,6 +56,10 @@ class ComponentRipper:
             # Extract for stealth mode
             if self.selector:
                 self.blueprint = await self._rip_component(page, self.selector)
+                if include_states:
+                    self.blueprint['interactive_states'] = await self._extract_component_states(page, self.selector)
+                if output_format == 'figma':
+                    self._attach_figma_output(self.blueprint)
             else:
                 self.blueprint = await self._rip_page_sections(page)
 
@@ -81,6 +91,10 @@ class ComponentRipper:
                     # Extract component blueprint
                     if self.selector:
                         self.blueprint = await self._rip_component(page, self.selector)
+                        if include_states:
+                            self.blueprint['interactive_states'] = await self._extract_component_states(page, self.selector)
+                        if output_format == 'figma':
+                            self._attach_figma_output(self.blueprint)
                     else:
                         # Rip common high-value components
                         self.blueprint = await self._rip_page_sections(page)
@@ -427,6 +441,205 @@ class ComponentRipper:
         blueprint['markdown'] = self._generate_markdown_doc(blueprint, component_name)
 
         return blueprint
+
+    async def _extract_component_states(self, page, selector: str) -> Dict:
+        """
+        Physically hover/focus interactive elements WITHIN the component
+        to capture real CSS state deltas.
+
+        Reuses STATE_PROPERTIES and _compute_delta from interaction_state_capture.
+        """
+        from extractors.interaction_state_capture import STATE_PROPERTIES, _compute_delta
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"Capturing interactive states for component: {selector}")
+
+        # Find interactive elements within the component + the root itself
+        elements = await page.evaluate('''(args) => {
+            const { rootSel, stateProps } = args;
+            const root = document.querySelector(rootSel);
+            if (!root) return [];
+
+            const results = [];
+
+            function readStyles(el) {
+                const s = window.getComputedStyle(el);
+                const out = {};
+                for (const p of stateProps) out[p] = s[p] || '';
+                return out;
+            }
+
+            function buildSelector(el) {
+                if (el.id) return '#' + CSS.escape(el.id);
+                const parent = el.parentElement;
+                if (!parent) return el.tagName.toLowerCase();
+                const siblings = parent.querySelectorAll(':scope > ' + el.tagName.toLowerCase());
+                let idx = 0;
+                for (let i = 0; i < siblings.length; i++) {
+                    if (siblings[i] === el) { idx = i; break; }
+                }
+                const parentSel = parent.id ? '#' + CSS.escape(parent.id) :
+                    parent.tagName.toLowerCase();
+                return parentSel + ' > ' + el.tagName.toLowerCase() + ':nth-of-type(' + (idx + 1) + ')';
+            }
+
+            // Root element
+            const rootRect = root.getBoundingClientRect();
+            if (rootRect.width > 0 && rootRect.height > 0) {
+                const cn = (typeof root.className === 'string') ? root.className : (root.className?.baseVal || '');
+                results.push({
+                    isRoot: true,
+                    selector: rootSel,
+                    displaySelector: rootSel,
+                    text: (root.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 30),
+                    tag: root.tagName.toLowerCase(),
+                    resting: readStyles(root),
+                    transition: window.getComputedStyle(root).transition || 'none',
+                });
+            }
+
+            // Interactive children (buttons, links, inputs)
+            const interactiveEls = root.querySelectorAll(
+                'button, a[href], [role="button"], input, textarea, select, [tabindex]:not([tabindex="-1"])'
+            );
+            let count = 0;
+            for (const el of interactiveEls) {
+                if (count >= 10) break;
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 5 || rect.height < 5) continue;
+                if (rect.top < -200 || rect.top > window.innerHeight + 500) continue;
+
+                const cn = (typeof el.className === 'string') ? el.className : (el.className?.baseVal || '');
+                results.push({
+                    isRoot: false,
+                    selector: buildSelector(el),
+                    displaySelector: el.id ? '#' + el.id : (cn.split(/\\s+/)[0] ? '.' + cn.split(/\\s+/)[0] : el.tagName.toLowerCase()),
+                    text: (el.textContent || '').replace(/\\s+/g, ' ').trim().substring(0, 30),
+                    tag: el.tagName.toLowerCase(),
+                    resting: readStyles(el),
+                    transition: window.getComputedStyle(el).transition || 'none',
+                });
+                count++;
+            }
+
+            return results;
+        }''', {'rootSel': selector, 'stateProps': STATE_PROPERTIES})
+
+        if not elements:
+            return {'root': None, 'children': [], 'states_detected': 0}
+
+        root_state = None
+        child_states = []
+        states_detected = 0
+
+        for el in elements:
+            sel = el['selector']
+            hover_delta = {}
+            focus_delta = {}
+
+            try:
+                locator = page.locator(sel).first
+                if not await locator.is_visible(timeout=1000):
+                    continue
+
+                # --- HOVER ---
+                try:
+                    await locator.hover(timeout=2000)
+                    await page.wait_for_timeout(150)
+
+                    hover_styles = await page.evaluate('''(args) => {
+                        const el = document.querySelector(args.sel);
+                        if (!el) return null;
+                        const s = window.getComputedStyle(el);
+                        const out = {};
+                        for (const p of args.props) out[p] = s[p] || '';
+                        return out;
+                    }''', {'sel': sel, 'props': STATE_PROPERTIES})
+
+                    if hover_styles:
+                        raw_delta = _compute_delta(el['resting'], hover_styles)
+                        if raw_delta:
+                            # Store actual CSS values, not just boolean markers
+                            hover_delta = {prop: hover_styles[prop] for prop in raw_delta}
+                            states_detected += 1
+                except Exception as e:
+                    logger.debug(f"Hover failed for {sel}: {str(e)[:60]}")
+
+                # --- FOCUS ---
+                try:
+                    await page.mouse.move(0, 0)
+                    await page.wait_for_timeout(100)
+                    await locator.focus(timeout=2000)
+                    await page.wait_for_timeout(100)
+
+                    focus_styles = await page.evaluate('''(args) => {
+                        const el = document.querySelector(args.sel);
+                        if (!el) return null;
+                        const s = window.getComputedStyle(el);
+                        const out = {};
+                        for (const p of args.props) out[p] = s[p] || '';
+                        return out;
+                    }''', {'sel': sel, 'props': STATE_PROPERTIES})
+
+                    if focus_styles:
+                        raw_delta = _compute_delta(el['resting'], focus_styles)
+                        if raw_delta:
+                            # Store actual CSS values, not just boolean markers
+                            focus_delta = {prop: focus_styles[prop] for prop in raw_delta}
+                            states_detected += 1
+
+                    # Blur to reset
+                    await page.evaluate('''(sel) => {
+                        const el = document.querySelector(sel);
+                        if (el && el.blur) el.blur();
+                    }''', sel)
+                except Exception as e:
+                    logger.debug(f"Focus failed for {sel}: {str(e)[:60]}")
+
+            except Exception as e:
+                logger.debug(f"State capture failed for {sel}: {str(e)[:60]}")
+                continue
+
+            entry = {
+                'selector': el['displaySelector'],
+                'tag': el['tag'],
+                'text': el['text'],
+                'hover_delta': hover_delta,
+                'focus_delta': focus_delta,
+                'transition': el['transition'],
+                'has_state_change': bool(hover_delta or focus_delta),
+            }
+
+            if el['isRoot']:
+                root_state = entry
+            else:
+                child_states.append(entry)
+
+        # Reset hover state
+        try:
+            await page.mouse.move(0, 0)
+        except Exception:
+            pass
+
+        logger.info(f"Component state capture: {states_detected} state changes across {len(elements)} elements")
+
+        return {
+            'root': root_state,
+            'children': child_states,
+            'states_detected': states_detected,
+        }
+
+    def _attach_figma_output(self, blueprint: Dict):
+        """Generate Figma-compatible markdown and attach to blueprint."""
+        try:
+            from component_translator import TailwindTranslator, generate_figma_markdown
+            translator = TailwindTranslator()
+            states = blueprint.get('interactive_states', {})
+            blueprint['figma_markdown'] = generate_figma_markdown(blueprint, states, translator)
+        except Exception as e:
+            import traceback
+            logging.getLogger(__name__).error(f"Figma output failed: {traceback.format_exc()}")
+            blueprint['figma_markdown'] = f'<!-- Figma output generation failed: {e} -->'
 
     async def _rip_page_sections(self, page):
         """

@@ -206,6 +206,10 @@ visual_hierarchy_analyzer.py — Heroes, CTAs, content grouping
 
 **spatial_composition_analyzer.py** — Page structure, spatial relationships, zones **(NEW)**
 
+**extractors/cdp_animation_extractor.py** — Runtime JS animations via CDP Animation domain **(NEW)**
+
+**extractors/axe_contrast_extractor.py** — WCAG AA contrast audit via injected axe-core **(NEW)**
+
 screenshot_annotator.py — Full-page screenshots + overlays
 
 content_extractor.py — Page-type classification
@@ -266,6 +270,10 @@ Returns computed CSS values (real pixels, not framework abstractions).
 Evidence-backed design system extraction
 
 **Spatial composition analysis** (NEW - Feb 2026)
+
+**CDP runtime animation capture** (NEW - Feb 2026) — catches JS-triggered animations CSS-only extraction misses
+
+**Axe-core WCAG AA contrast audit** (NEW - Feb 2026) — per-element violations with fg/bg colours and ratios
 
 LLM-helper with suggested next steps
 
@@ -444,10 +452,25 @@ Capture lessons after corrections
   - Recommendation: Document as known constraint
 
 **❌ Does Not Work With:**
+- **Closed Shadow DOM** — browser-level restriction, even CDP cannot access; open shadow DOM is traversable
 - Shadow DOM / Web Components (cannot access encapsulated styles)
 - Aggressive bot protection (Cloudflare Turnstile, PerimeterX)
 - Sites requiring authentication (no login support)
 - Infinite scroll content (only analyzes initial DOM)
+
+**CDP Animation Extractor notes:**
+- Captures CSS transitions, CSS keyframe animations, and Web Animations API (WAAPI)
+- Only sees animations triggered within the observation window (load + hover + scroll)
+- Misses: auth-gated animations, video-triggered, deep-user-gesture animations
+- Evidence key: `cdp_animations`
+
+**Axe-core Contrast Extractor notes:**
+- Requires `website-understanding-sdk/node_modules/axe-core/axe.min.js`
+- Install: `npm install axe-core --prefix ./website-understanding-sdk`
+- Injected via `add_init_script()` (CDP-level, bypasses page CSP headers)
+- Runs WCAG AA rules: `color-contrast` and `color-contrast-enhanced`
+- Score: 100 − (critical×15 + serious×8 + moderate×3 + minor×1), min 0
+- Evidence key: `contrast_a11y`
 
 ### Metric Reliability (5-Site Test Results)
 

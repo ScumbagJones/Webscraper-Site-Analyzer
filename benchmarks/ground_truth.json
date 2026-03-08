@@ -1,0 +1,182 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "last_updated": "2026-02",
+    "description": "Ground truth for 5 well-known sites used to validate DeepEvidenceEngine accuracy. Values derived from manual DevTools inspection + public design documentation.",
+    "confidence_threshold": 0.6,
+    "tolerance": {
+      "color_hex_delta_e": 5,
+      "font_size_pct": 0.10,
+      "spacing_pct": 0.20
+    }
+  },
+
+  "stripe.com": {
+    "description": "Payment platform — semantic CSS, strong design system, 8px grid",
+    "known_stack": ["React", "CSS Modules", "Next.js"],
+    "typography": {
+      "primary_font_family": "Sohne",
+      "fallback_families": ["system-ui", "sans-serif"],
+      "base_size_px": 16,
+      "scale_ratio_name": "major_third",
+      "scale_ratio": 1.25,
+      "expected_sizes_px": [12, 14, 16, 20, 24, 32, 40, 48]
+    },
+    "colors": {
+      "primary_brand": "#635BFF",
+      "secondary_brand": "#0A2540",
+      "accent": "#00D924",
+      "background": "#FFFFFF",
+      "text_primary": "#0A2540",
+      "text_secondary": "#425466"
+    },
+    "spacing": {
+      "base_unit_px": 8,
+      "expected_scale_px": [4, 8, 16, 24, 32, 40, 48, 64, 80, 96]
+    },
+    "layout": {
+      "max_width_px": 1440,
+      "grid_columns": 12,
+      "page_type": "landingPage"
+    },
+    "accessibility": {
+      "min_contrast_ratio": 4.5,
+      "has_skip_link": true,
+      "semantic_landmarks": ["header", "main", "footer", "nav"]
+    }
+  },
+
+  "vercel.com": {
+    "description": "Deployment platform — utility-first CSS (Geist), dark-first design",
+    "known_stack": ["Next.js", "Tailwind", "Geist UI"],
+    "typography": {
+      "primary_font_family": "Geist",
+      "fallback_families": ["system-ui", "sans-serif"],
+      "base_size_px": 14,
+      "scale_ratio_name": "major_third",
+      "scale_ratio": 1.25,
+      "expected_sizes_px": [12, 14, 16, 20, 24, 32, 40, 48, 64]
+    },
+    "colors": {
+      "primary_brand": "#000000",
+      "background": "#000000",
+      "surface": "#111111",
+      "text_primary": "#EDEDED",
+      "text_secondary": "#888888",
+      "accent": "#0070F3"
+    },
+    "spacing": {
+      "base_unit_px": 4,
+      "expected_scale_px": [4, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+    },
+    "layout": {
+      "max_width_px": 1200,
+      "grid_columns": 12,
+      "page_type": "landingPage"
+    },
+    "accessibility": {
+      "has_skip_link": false,
+      "semantic_landmarks": ["header", "main", "footer"]
+    }
+  },
+
+  "en.wikipedia.org": {
+    "description": "Encyclopedia — document-style, article layout, minimal design system",
+    "known_stack": ["MediaWiki", "PHP", "vanilla CSS"],
+    "typography": {
+      "primary_font_family": "Linux Libertine",
+      "fallback_families": ["Georgia", "Times", "serif"],
+      "base_size_px": 16,
+      "scale_ratio_name": "none",
+      "expected_sizes_px": [12, 14, 16, 18, 24, 28]
+    },
+    "colors": {
+      "primary_brand": "#3366CC",
+      "background": "#FFFFFF",
+      "text_primary": "#202122",
+      "text_secondary": "#555555",
+      "link_color": "#3366CC",
+      "visited_link": "#6B4BA1"
+    },
+    "spacing": {
+      "base_unit_px": 8,
+      "expected_scale_px": [4, 8, 16, 24, 32]
+    },
+    "layout": {
+      "max_width_px": 960,
+      "grid_columns": 1,
+      "page_type": "singleArticle"
+    },
+    "accessibility": {
+      "has_skip_link": true,
+      "semantic_landmarks": ["header", "main", "footer", "nav", "aside"]
+    }
+  },
+
+  "developer.mozilla.org": {
+    "description": "MDN Web Docs — documentation layout, dark mode toggle, strong a11y",
+    "known_stack": ["React", "Next.js", "CSS custom properties"],
+    "typography": {
+      "primary_font_family": "Inter",
+      "fallback_families": ["system-ui", "sans-serif"],
+      "base_size_px": 16,
+      "scale_ratio_name": "major_second",
+      "scale_ratio": 1.125,
+      "expected_sizes_px": [12, 14, 16, 18, 20, 24, 28, 32]
+    },
+    "colors": {
+      "primary_brand": "#1D4ED8",
+      "background": "#FFFFFF",
+      "surface": "#F9F9FB",
+      "text_primary": "#15141A",
+      "text_secondary": "#696976",
+      "code_background": "#F5F5F5"
+    },
+    "spacing": {
+      "base_unit_px": 8,
+      "expected_scale_px": [4, 8, 16, 24, 32, 48, 64]
+    },
+    "layout": {
+      "max_width_px": 1440,
+      "grid_columns": 3,
+      "page_type": "singleArticle"
+    },
+    "accessibility": {
+      "has_skip_link": true,
+      "semantic_landmarks": ["header", "main", "footer", "nav", "aside", "article"]
+    }
+  },
+
+  "shopify.com": {
+    "description": "E-commerce platform — mixed utility/semantic CSS, conversion-focused",
+    "known_stack": ["React", "Polaris Design System"],
+    "typography": {
+      "primary_font_family": "ShopifySans",
+      "fallback_families": ["Helvetica Neue", "system-ui", "sans-serif"],
+      "base_size_px": 16,
+      "scale_ratio_name": "major_third",
+      "scale_ratio": 1.25,
+      "expected_sizes_px": [12, 14, 16, 20, 24, 32, 40, 48, 64]
+    },
+    "colors": {
+      "primary_brand": "#008060",
+      "secondary_brand": "#004C3F",
+      "background": "#FFFFFF",
+      "text_primary": "#1A1A1A",
+      "cta_color": "#008060"
+    },
+    "spacing": {
+      "base_unit_px": 8,
+      "expected_scale_px": [4, 8, 16, 24, 32, 40, 48, 64, 80]
+    },
+    "layout": {
+      "max_width_px": 1200,
+      "grid_columns": 12,
+      "page_type": "landingPage"
+    },
+    "accessibility": {
+      "has_skip_link": false,
+      "semantic_landmarks": ["header", "main", "footer", "nav"]
+    }
+  }
+}

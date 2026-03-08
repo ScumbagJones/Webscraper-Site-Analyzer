@@ -11,3 +11,11 @@ archive/
 tasks/
 docs/
 *.jsonl
+.screenshots/
+screenshots/
+browser_sessions/
+*.png
+!static/**/*.png
+server.pid
+.DS_Store
+website-understanding-sdk/

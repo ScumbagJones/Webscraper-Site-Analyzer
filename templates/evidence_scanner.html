@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture MRI - Evidence-Based Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding: 2rem 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 300;
+            letter-spacing: -1px;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header .subtitle {
+            color: #888;
+            font-size: 0.95rem;
+            letter-spacing: 1px;
+        }
+
+        .header .tagline {
+            color: #00ff88;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
+
+        .scanner-panel {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 1rem;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 1rem;
+            color: #fff;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #00ff88;
+        }
+
+        .scan-btn {
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            border: none;
+            padding: 1rem 3rem;
+            border-radius: 4px;
+            color: #000;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            font-family: inherit;
+        }
+
+        .scan-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .scan-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .progress-console {
+            display: none;
+            background: #000;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .progress-console.active {
+            display: block;
+        }
+
+        .log-entry {
+            padding: 0.4rem 0;
+            color: #aaa;
+            font-size: 0.9rem;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Tabs */
+        .tabs {
+            display: none;
+            border-bottom: 1px solid #333;
+            margin-bottom: 2rem;
+        }
+
+        .tabs.active {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .tab {
+            padding: 1rem 0;
+            color: #666;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #aaa;
+        }
+
+        .tab.active {
+            color: #00ff88;
+            border-bottom-color: #00ff88;
+        }
+
+        /* Results Grid */
+        .results-grid {
+            display: none;
+        }
+
+        .results-grid.active {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 1.5rem;
+        }
+
+        /* Diagnostic Tile */
+        .diagnostic-tile {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            animation: slideUp 0.5s;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .tile-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .tile-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tile-title h3 {
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 400;
+        }
+
+        .tile-emoji {
+            font-size: 1.5rem;
+        }
+
+        /* Confidence Badge */
+        .confidence-badge {
+            background: #1a1a1a;
+            border: 1px solid;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .confidence-high {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+
+        .confidence-medium {
+            border-color: #ffaa00;
+            color: #ffaa00;
+        }
+
+        .confidence-low {
+            border-color: #ff4444;
+            color: #ff4444;
+        }
+
+        /* Pattern Badge */
+        .pattern-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            color: #000;
+            padding: 0.4rem 1rem;
+            border-radius: 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        /* Proof Section */
+        .proof-section {
+            background: #0a0a0a;
+            border-left: 3px solid #00ff88;
+            padding: 1rem;
+            margin: 1rem 0;
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+        .proof-label {
+            color: #666;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .proof-text {
+            color: #00ff88;
+            font-family: monospace;
+        }
+
+        /* Code Snippet */
+        .code-snippet {
+            background: #000;
+            border: 1px solid #222;
+            border-radius: 4px;
+            padding: 1rem;
+            margin-top: 1rem;
+            position: relative;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .code-label {
+            color: #666;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .copy-btn {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #00ff88;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #00ff88;
+            color: #000;
+        }
+
+        .code-content {
+            color: #00ff88;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        /* Sparkline */
+        .sparkline {
+            margin: 1rem 0;
+        }
+
+        .sparkline-label {
+            color: #666;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .sparkline-chart {
+            height: 40px;
+            background: #0a0a0a;
+            border-radius: 4px;
+            padding: 0.5rem;
+            position: relative;
+        }
+
+        .sparkline-bar {
+            position: absolute;
+            bottom: 0;
+            width: 8px;
+            background: linear-gradient(180deg, #00ff88 0%, #00aa66 100%);
+            border-radius: 2px 2px 0 0;
+            transition: height 0.5s;
+        }
+
+        /* Network Pulse Tab */
+        .network-pulse {
+            display: none;
+        }
+
+        .network-pulse.active {
+            display: block;
+        }
+
+        .pulse-stat {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .pulse-stat h4 {
+            color: #00ff88;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.75rem;
+        }
+
+        .pulse-value {
+            font-size: 2rem;
+            font-weight: 300;
+            color: #fff;
+        }
+
+        .pulse-detail {
+            color: #666;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+
+        .api-list {
+            list-style: none;
+            margin-top: 1rem;
+        }
+
+        .api-item {
+            background: #0a0a0a;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #aaa;
+            border-left: 3px solid #00ff88;
+        }
+
+        .api-method {
+            color: #00ff88;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 ARCHITECTURE MRI</h1>
+            <p class="subtitle">EVIDENCE-BASED SCANNING</p>
+            <p class="tagline">"Show me the X-ray, not the horoscope"</p>
+        </div>
+
+        <div class="scanner-panel">
+            <div class="input-group">
+                <input type="text" id="siteUrl" placeholder="Enter site URL (e.g., ssense.com)" value="">
+                <button class="scan-btn" onclick="startScan()" id="scanBtn">START SCAN</button>
+            </div>
+        </div>
+
+        <div class="progress-console" id="progressConsole">
+            <div id="logOutput"></div>
+        </div>
+
+        <div class="tabs" id="tabsNav">
+            <div class="tab active" data-tab="diagnostics">DIAGNOSTICS</div>
+            <div class="tab" data-tab="network">NETWORK PULSE</div>
+        </div>
+
+        <div class="results-grid" id="diagnosticsTab">
+            <!-- Diagnostic tiles will be inserted here -->
+        </div>
+
+        <div class="network-pulse" id="networkTab">
+            <!-- Network pulse will be inserted here -->
+        </div>
+    </div>
+
+    <script>
+        let currentEvidence = null;
+
+        function addLog(emoji, message) {
+            const logOutput = document.getElementById('logOutput');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `${emoji} ${message}`;
+            logOutput.appendChild(entry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        async function startScan() {
+            const siteUrl = document.getElementById('siteUrl').value;
+            if (!siteUrl) {
+                alert('Please enter a site URL');
+                return;
+            }
+
+            // Reset UI
+            document.getElementById('logOutput').innerHTML = '';
+            document.getElementById('diagnosticsTab').innerHTML = '';
+            document.getElementById('diagnosticsTab').classList.remove('active');
+            document.getElementById('networkTab').innerHTML = '';
+            document.getElementById('networkTab').classList.remove('active');
+            document.getElementById('tabsNav').classList.remove('active');
+
+            // Show progress
+            document.getElementById('progressConsole').classList.add('active');
+
+            const scanBtn = document.getElementById('scanBtn');
+            scanBtn.disabled = true;
+            scanBtn.textContent = 'SCANNING...';
+
+            try {
+                const response = await fetch('/api/evidence-scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ site_url: siteUrl })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addLog('❌', `Error: ${data.error}`);
+                    return;
+                }
+
+                currentEvidence = data.evidence;
+
+                addLog('✅', 'Evidence collection complete!');
+
+                // Display results
+                displayDiagnostics(data.evidence);
+                displayNetworkPulse(data.evidence.network_pulse);
+
+                // Show tabs
+                document.getElementById('tabsNav').classList.add('active');
+
+            } catch (error) {
+                addLog('❌', `Error: ${error.message}`);
+            } finally {
+                scanBtn.disabled = false;
+                scanBtn.textContent = 'START SCAN';
+            }
+        }
+
+        function displayDiagnostics(evidence) {
+            const container = document.getElementById('diagnosticsTab');
+            let html = '';
+
+            // State Persistence
+            if (evidence.state_persistence) {
+                const sp = evidence.state_persistence;
+                const confidenceClass = sp.confidence >= 80 ? 'high' : sp.confidence >= 60 ? 'medium' : 'low';
+
+                html += `
+                    <div class="diagnostic-tile">
+                        <div class="tile-header">
+                            <div class="tile-title">
+                                <span class="tile-emoji">💎</span>
+                                <h3>State Persistence</h3>
+                            </div>
+                            <div class="confidence-badge confidence-${confidenceClass}">
+                                ${sp.confidence}% CONFIDENT
+                            </div>
+                        </div>
+
+                        <div class="pattern-badge">${sp.pattern}</div>
+
+                        <div class="proof-section">
+                            <div class="proof-label">→ Technical Receipt</div>
+                            <div class="proof-text">${sp.proof}</div>
+                        </div>
+
+                        ${sp.stability_score !== null ? `
+                            <div class="sparkline">
+                                <div class="sparkline-label">Stability Score: ${sp.stability_score.toFixed(1)}%</div>
+                                <div class="sparkline-chart">
+                                    <div class="sparkline-bar" style="left: 10px; height: ${sp.stability_score}%;"></div>
+                                    <div class="sparkline-bar" style="left: 25px; height: ${sp.stability_score * 0.9}%;"></div>
+                                    <div class="sparkline-bar" style="left: 40px; height: ${sp.stability_score * 1.1}%;"></div>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // Grid System
+            if (evidence.grid_system && evidence.grid_system.code_snippet) {
+                const gs = evidence.grid_system;
+                const confidenceClass = gs.confidence >= 80 ? 'high' : gs.confidence >= 60 ? 'medium' : 'low';
+
+                html += `
+                    <div class="diagnostic-tile">
+                        <div class="tile-header">
+                            <div class="tile-title">
+                                <span class="tile-emoji">📐</span>
+                                <h3>Grid System</h3>
+                            </div>
+                            <div class="confidence-badge confidence-${confidenceClass}">
+                                ${gs.confidence}% CONFIDENT
+                            </div>
+                        </div>
+
+                        <div class="pattern-badge">${gs.pattern}</div>
+
+                        <div class="proof-section">
+                            <div class="proof-label">→ Found On</div>
+                            <div class="proof-text">${gs.proof}</div>
+                        </div>
+
+                        <div class="code-snippet">
+                            <div class="code-header">
+                                <span class="code-label">→ Copy This Code</span>
+                                <button class="copy-btn" onclick="copyCode(this, \`${gs.code_snippet.replace(/`/g, '\\`')}\`)">COPY</button>
+                            </div>
+                            <div class="code-content">${gs.code_snippet}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Typography
+            if (evidence.typography && evidence.typography.code_snippet) {
+                const ty = evidence.typography;
+
+                html += `
+                    <div class="diagnostic-tile">
+                        <div class="tile-header">
+                            <div class="tile-title">
+                                <span class="tile-emoji">🖋️</span>
+                                <h3>Typography</h3>
+                            </div>
+                            <div class="confidence-badge confidence-high">
+                                ${ty.confidence}% CONFIDENT
+                            </div>
+                        </div>
+
+                        <div class="pattern-badge">${ty.pattern}</div>
+
+                        <div class="proof-section">
+                            <div class="proof-label">→ Detected</div>
+                            <div class="proof-text">${ty.proof}</div>
+                        </div>
+
+                        <div class="code-snippet">
+                            <div class="code-header">
+                                <span class="code-label">→ Copy This Code</span>
+                                <button class="copy-btn" onclick="copyCode(this, \`${ty.code_snippet.replace(/`/g, '\\`')}\`)">COPY</button>
+                            </div>
+                            <div class="code-content">${ty.code_snippet}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Data Strategy
+            if (evidence.data_strategy) {
+                const ds = evidence.data_strategy;
+                const confidenceClass = ds.confidence >= 80 ? 'high' : ds.confidence >= 60 ? 'medium' : 'low';
+
+                html += `
+                    <div class="diagnostic-tile">
+                        <div class="tile-header">
+                            <div class="tile-title">
+                                <span class="tile-emoji">📡</span>
+                                <h3>Data Strategy</h3>
+                            </div>
+                            <div class="confidence-badge confidence-${confidenceClass}">
+                                ${ds.confidence}% CONFIDENT
+                            </div>
+                        </div>
+
+                        <div class="pattern-badge">${ds.pattern}</div>
+
+                        <div class="proof-section">
+                            <div class="proof-label">→ Evidence</div>
+                            <div class="proof-text">${ds.proof}</div>
+                        </div>
+
+                        ${ds.code_snippet ? `
+                            <div class="code-snippet">
+                                <div class="code-header">
+                                    <span class="code-label">→ Implementation Pattern</span>
+                                    <button class="copy-btn" onclick="copyCode(this, \`${ds.code_snippet.replace(/`/g, '\\`')}\`)">COPY</button>
+                                </div>
+                                <div class="code-content">${ds.code_snippet}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // Framework
+            if (evidence.framework) {
+                const fw = evidence.framework;
+                const confidenceClass = fw.confidence >= 80 ? 'high' : fw.confidence >= 60 ? 'medium' : 'low';
+
+                html += `
+                    <div class="diagnostic-tile">
+                        <div class="tile-header">
+                            <div class="tile-title">
+                                <span class="tile-emoji">🏛️</span>
+                                <h3>Framework</h3>
+                            </div>
+                            <div class="confidence-badge confidence-${confidenceClass}">
+                                ${fw.confidence}% CONFIDENT
+                            </div>
+                        </div>
+
+                        <div class="pattern-badge">${fw.pattern}</div>
+
+                        <div class="proof-section">
+                            <div class="proof-label">→ Fingerprint</div>
+                            <div class="proof-text">${fw.proof}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+            container.classList.add('active');
+        }
+
+        function displayNetworkPulse(pulse) {
+            const container = document.getElementById('networkTab');
+
+            let html = `
+                <div class="pulse-stat">
+                    <h4>Total Network Requests</h4>
+                    <div class="pulse-value">${pulse.total_requests}</div>
+                    <div class="pulse-detail">
+                        ${pulse.asset_summary.scripts} scripts,
+                        ${pulse.asset_summary.stylesheets} stylesheets,
+                        ${pulse.asset_summary.images} images,
+                        ${pulse.asset_summary.fonts} fonts
+                    </div>
+                </div>
+            `;
+
+            if (pulse.api_calls && pulse.api_calls.length > 0) {
+                html += `
+                    <div class="pulse-stat">
+                        <h4>API Calls Detected</h4>
+                        <div class="pulse-value">${pulse.api_calls.length}</div>
+                        <ul class="api-list">
+                            ${pulse.api_calls.slice(0, 5).map(api => `
+                                <li class="api-item">
+                                    <span class="api-method">${api.method}</span>
+                                    ${api.url.substring(0, 80)}${api.url.length > 80 ? '...' : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            if (pulse.graphql_calls && pulse.graphql_calls.length > 0) {
+                html += `
+                    <div class="pulse-stat">
+                        <h4>GraphQL Queries</h4>
+                        <div class="pulse-value">${pulse.graphql_calls.length}</div>
+                        <ul class="api-list">
+                            ${pulse.graphql_calls.map(gql => `
+                                <li class="api-item">
+                                    <span class="api-method">${gql.method}</span>
+                                    ${gql.url}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function copyCode(button, code) {
+            navigator.clipboard.writeText(code).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'COPIED!';
+                button.style.background = '#00ff88';
+                button.style.color = '#000';
+
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.background = '';
+                    button.style.color = '';
+                }, 2000);
+            });
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetTab = tab.getAttribute('data-tab');
+
+                // Update active tab
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Show correct content
+                if (targetTab === 'diagnostics') {
+                    document.getElementById('diagnosticsTab').classList.add('active');
+                    document.getElementById('networkTab').classList.remove('active');
+                } else {
+                    document.getElementById('diagnosticsTab').classList.remove('active');
+                    document.getElementById('networkTab').classList.add('active');
+                }
+            });
+        });
+
+        // Enter key support
+        document.getElementById('siteUrl').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') startScan();
+        });
+    </script>
+</body>
+</html>

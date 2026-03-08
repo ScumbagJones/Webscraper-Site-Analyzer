@@ -1,0 +1,15 @@
+# Core dependencies for Web Scraper
+flask==3.1.0
+patchright>=1.0.0
+beautifulsoup4==4.14.3
+lxml==5.4.0
+
+# Optional: Enhanced stealth (Cloudflare solver, requires Python 3.10+)
+# pip install "scrapling[fetchers]" && scrapling install
+
+# Other dependencies
+pillow==11.3.0
+requests==2.32.3
+numpy==2.0.2
+anthropic==0.39.0
+opencv-python==4.10.0.84

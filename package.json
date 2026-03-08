@@ -1,0 +1,11 @@
+{
+  "name": "web-intelligence-scraper",
+  "version": "1.0.0",
+  "description": "Web scraping and design analysis system",
+  "scripts": {
+    "start": "bash start.sh",
+    "start:prod": "bash start.sh production",
+    "install:axe": "npm install axe-core --prefix ./website-understanding-sdk"
+  },
+  "private": true
+}

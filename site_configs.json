@@ -1,0 +1,116 @@
+{
+  "configs": {
+    "theverge.com": {
+      "containerSelector": ".duet--content-cards--content-card, [class*='content-card']:not(.m-ad)",
+      "titleSelectors": ["h2 a", "h2", "h3"],
+      "excerptSelectors": ["p"],
+      "authorSelectors": ["[class*='author']"],
+      "dateSelectors": ["time"],
+      "imageSelectors": ["img"],
+      "notes": "Uses card-based layout - exclude ads with :not(.m-ad)"
+    },
+    "wired.com": {
+      "containerSelector": "div[class*='CollageEnvironment'], div[class*='SummaryItem']",
+      "titleSelectors": ["a[href*='/story/']", "h3 a", "[class*='Hed'] a"],
+      "excerptSelectors": ["[class*='Dek']", "[class*='dek']", "p"],
+      "authorSelectors": ["[class*='byline']", "[class*='Byline']", "[class*='author']"],
+      "dateSelectors": ["time", "[class*='PublishDate']"],
+      "imageSelectors": ["img"],
+      "notes": "Complex layout - article titles are in links, not h2 elements"
+    },
+    "blog.github.com": {
+      "containerSelector": "article.post-card",
+      "titleSelectors": ["h2 a", ".post-card__link"],
+      "excerptSelectors": ["p"],
+      "authorSelectors": ["[class*='author']"],
+      "dateSelectors": ["time"],
+      "imageSelectors": ["img"],
+      "notes": "Has proper article tags but needs specific title selector"
+    },
+    "medium.com": {
+      "containerSelector": "article, div[class*='streamItem'], [data-testid='article']",
+      "titleSelectors": ["h2", "h3", "h1"],
+      "excerptSelectors": ["[class*='subtitle']", "h4", "p"],
+      "additionalWait": 8000,
+      "notes": "Heavy React hydration - needs 8+ second wait"
+    },
+    "polyesterzine.com": {
+      "containerSelector": "li.slide, li.list-item",
+      "titleSelectors": ["h2", "h3", "[class*='title']"],
+      "excerptSelectors": ["p", "[class*='excerpt']", "[class*='description']"],
+      "notes": "Squarespace carousel - uses li.slide elements"
+    },
+    "thisiscolossal.com": {
+      "containerSelector": "article, [class*='post']",
+      "titleSelectors": ["h2 a", "h1"],
+      "excerptSelectors": ["[class*='excerpt']", "p"],
+      "notes": "WordPress site with 142 articles - needs investigation"
+    },
+    "polygon.com": {
+      "containerSelector": "[class*='entry']",
+      "titleSelectors": ["h2 a", "h3 a"],
+      "excerptSelectors": ["[class*='dek']", "p"],
+      "notes": "Vox Media network site"
+    },
+    "engadget.com": {
+      "containerSelector": "[class*='article'], [data-component='ArticleCard']",
+      "titleSelectors": ["h2", "h3"],
+      "excerptSelectors": ["p"],
+      "notes": "Yahoo/Verizon media property"
+    }
+  },
+  "defaultConfig": {
+    "containerSelectors": [
+      "article",
+      "[class*='article']",
+      "[class*='post']",
+      "[class*='story']",
+      "[class*='card']"
+    ],
+    "titleSelectors": [
+      "h2 a",
+      "h3 a",
+      "h2",
+      "h3",
+      "h1",
+      "[class*='title'] a",
+      "[class*='headline'] a",
+      "[class*='title']",
+      "[class*='headline']"
+    ],
+    "excerptSelectors": [
+      "[class*='excerpt']",
+      "[class*='summary']",
+      "[class*='description']",
+      "p:not([class*='meta'])"
+    ],
+    "authorSelectors": [
+      "[class*='author']",
+      "[rel='author']",
+      "[class*='byline']",
+      "[class*='writer']"
+    ],
+    "dateSelectors": [
+      "time",
+      "[class*='date']",
+      "[class*='published']"
+    ],
+    "imageSelectors": ["img"],
+    "validationRules": {
+      "title": {
+        "minLength": 5,
+        "maxLength": 200
+      },
+      "excerpt": {
+        "minLength": 20,
+        "maxLength": 500
+      },
+      "author": {
+        "maxLength": 100
+      },
+      "date": {
+        "maxLength": 50
+      }
+    }
+  }
+}

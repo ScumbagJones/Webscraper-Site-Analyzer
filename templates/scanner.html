@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture MRI Scanner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding: 2rem 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 300;
+            letter-spacing: -1px;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: #888;
+            font-size: 0.95rem;
+            letter-spacing: 1px;
+        }
+
+        .scanner-panel {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .scanner-title {
+            font-size: 0.85rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 1.5rem;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 1rem;
+            color: #fff;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #00ff88;
+        }
+
+        input[type="text"]::placeholder {
+            color: #444;
+        }
+
+        .scan-btn {
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            border: none;
+            padding: 1rem 3rem;
+            border-radius: 4px;
+            color: #000;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .scan-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 255, 136, 0.3);
+        }
+
+        .scan-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .presets {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .preset-chip {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            color: #888;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-chip:hover {
+            border-color: #00ff88;
+            color: #00ff88;
+        }
+
+        .progress-console {
+            display: none;
+            background: #000;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .progress-console.active {
+            display: block;
+        }
+
+        .progress-header {
+            color: #666;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #222;
+        }
+
+        .log-entry {
+            padding: 0.5rem 0;
+            color: #aaa;
+            font-size: 0.9rem;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .log-emoji {
+            margin-right: 0.5rem;
+        }
+
+        .results-grid {
+            display: none;
+        }
+
+        .results-grid.active {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        .result-card {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1.5rem;
+            animation: slideUp 0.5s;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .result-card h3 {
+            color: #00ff88;
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            font-weight: 400;
+        }
+
+        .result-badge {
+            display: inline-block;
+            background: #1a1a1a;
+            border: 1px solid #00ff88;
+            color: #00ff88;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .result-text {
+            color: #aaa;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+
+        .code-snippet {
+            background: #000;
+            border: 1px solid #222;
+            border-radius: 4px;
+            padding: 1rem;
+            overflow-x: auto;
+            font-size: 0.85rem;
+            color: #00ff88;
+            margin-top: 1rem;
+        }
+
+        .advanced-toggle {
+            color: #666;
+            font-size: 0.85rem;
+            cursor: pointer;
+            margin-top: 1rem;
+            text-decoration: underline;
+        }
+
+        .advanced-toggle:hover {
+            color: #00ff88;
+        }
+
+        .advanced-settings {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #222;
+        }
+
+        .advanced-settings.active {
+            display: block;
+        }
+
+        .advanced-input {
+            margin-bottom: 0.75rem;
+        }
+
+        .advanced-input label {
+            display: block;
+            color: #666;
+            font-size: 0.8rem;
+            margin-bottom: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .advanced-input input {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 MRI SCANNER</h1>
+            <p>AUTOMATIC ARCHITECTURE ANALYSIS</p>
+        </div>
+
+        <div class="scanner-panel">
+            <div class="scanner-title">→ SCAN TARGET</div>
+
+            <div class="presets">
+                <div class="preset-chip" onclick="loadPreset('nts')">NTS.LIVE</div>
+                <div class="preset-chip" onclick="loadPreset('ssense')">SSENSE.COM</div>
+                <div class="preset-chip" onclick="loadPreset('pifyi')">PI.FYI</div>
+            </div>
+
+            <div class="input-group">
+                <input type="text" id="siteUrl" placeholder="Enter site URL (e.g., ssense.com)" value="">
+                <button class="scan-btn" onclick="startScan()" id="scanBtn">START SCAN</button>
+            </div>
+
+            <div class="advanced-toggle" onclick="toggleAdvanced()">
+                ⚙️ Advanced Settings (manual URL override)
+            </div>
+
+            <div class="advanced-settings" id="advancedSettings">
+                <div class="advanced-input">
+                    <label>Home URL</label>
+                    <input type="text" id="homeUrl" placeholder="Auto-detected">
+                </div>
+                <div class="advanced-input">
+                    <label>List URL</label>
+                    <input type="text" id="listUrl" placeholder="Auto-detected">
+                </div>
+                <div class="advanced-input">
+                    <label>Detail URL</label>
+                    <input type="text" id="detailUrl" placeholder="Auto-detected">
+                </div>
+            </div>
+        </div>
+
+        <div class="progress-console" id="progressConsole">
+            <div class="progress-header">→ LIVE DIAGNOSTIC FEED</div>
+            <div id="logOutput"></div>
+        </div>
+
+        <div class="results-grid" id="resultsGrid">
+            <!-- Results will be inserted here -->
+        </div>
+    </div>
+
+    <script>
+        const presets = {
+            'nts': 'https://nts.live',
+            'ssense': 'https://ssense.com',
+            'pifyi': 'https://pi.fyi'
+        };
+
+        function loadPreset(name) {
+            document.getElementById('siteUrl').value = presets[name];
+        }
+
+        function toggleAdvanced() {
+            const settings = document.getElementById('advancedSettings');
+            settings.classList.toggle('active');
+        }
+
+        function addLog(emoji, message) {
+            const logOutput = document.getElementById('logOutput');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-emoji">${emoji}</span>${message}`;
+            logOutput.appendChild(entry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        async function startScan() {
+            const siteUrl = document.getElementById('siteUrl').value;
+            if (!siteUrl) {
+                alert('Please enter a site URL');
+                return;
+            }
+
+            // Clear previous results
+            document.getElementById('logOutput').innerHTML = '';
+            document.getElementById('resultsGrid').innerHTML = '';
+            document.getElementById('resultsGrid').classList.remove('active');
+
+            // Show progress console
+            document.getElementById('progressConsole').classList.add('active');
+
+            // Disable button
+            const scanBtn = document.getElementById('scanBtn');
+            scanBtn.disabled = true;
+            scanBtn.textContent = 'SCANNING...';
+
+            try {
+                // Use sync endpoint for simplicity
+                const response = await fetch('/api/scan-sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ site_url: siteUrl })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addLog('❌', `Error: ${data.error}`);
+                    return;
+                }
+
+                // Show progress logs
+                if (data.progress_log) {
+                    data.progress_log.forEach(log => {
+                        const parts = log.split(' ', 1);
+                        const emoji = parts[0];
+                        const message = log.substring(emoji.length + 1);
+                        addLog(emoji, message);
+                    });
+                }
+
+                addLog('✅', 'Scan complete!');
+
+                // Display results
+                displayResults(data.results);
+
+            } catch (error) {
+                addLog('❌', `Error: ${error.message}`);
+            } finally {
+                scanBtn.disabled = false;
+                scanBtn.textContent = 'START SCAN';
+            }
+        }
+
+        function displayResults(results) {
+            const recipe = results.developer_recipe;
+            const grid = document.getElementById('resultsGrid');
+
+            let html = '';
+
+            // Skeleton
+            if (recipe.skeleton) {
+                html += `
+                    <div class="result-card">
+                        <h3>🏗️ THE SKELETON</h3>
+                        <div class="result-badge">${recipe.skeleton.pattern}</div>
+                        <p class="result-text">${recipe.skeleton.instruction}</p>
+                        ${recipe.skeleton.code_hint ? `<div class="code-snippet">${recipe.skeleton.code_hint}</div>` : ''}
+                    </div>
+                `;
+            }
+
+            // Mannerisms
+            if (recipe.mannerisms && recipe.mannerisms.grid) {
+                html += `
+                    <div class="result-card">
+                        <h3>🎨 THE MANNERISMS</h3>
+                        <div class="result-badge">${recipe.mannerisms.grid}</div>
+                        <p class="result-text">${recipe.mannerisms.instruction}</p>
+                        ${recipe.mannerisms.code_hint ? `<div class="code-snippet">${recipe.mannerisms.code_hint}</div>` : ''}
+                    </div>
+                `;
+            }
+
+            // Data Strategy
+            if (recipe.data_strategy) {
+                html += `
+                    <div class="result-card">
+                        <h3>📚 THE DATA STRATEGY</h3>
+                        <div class="result-badge">${recipe.data_strategy.pattern}</div>
+                        <p class="result-text">${recipe.data_strategy.instruction}</p>
+                        ${recipe.data_strategy.code_hint ? `<p class="result-text" style="color: #666;">${recipe.data_strategy.code_hint}</p>` : ''}
+                        ${recipe.data_strategy.mock_query ? `<div class="code-snippet">${recipe.data_strategy.mock_query}</div>` : ''}
+                    </div>
+                `;
+            }
+
+            grid.innerHTML = html;
+            grid.classList.add('active');
+        }
+
+        // Enter key support
+        document.getElementById('siteUrl').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') startScan();
+        });
+    </script>
+</body>
+</html>

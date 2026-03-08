@@ -3,211 +3,525 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Glossary - Web Inspector</title>
+    <title>Glossary — Web Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            /* ── Surface System ── */
+            --surface-0: #0f0f11;
+            --surface-1: #161618;
+            --surface-2: #1c1c20;
+            --surface-3: #242429;
+            --surface-4: #2c2c33;
+
+            /* ── Border System ── */
+            --border-subtle: rgba(255,255,255,0.06);
+            --border-default: rgba(255,255,255,0.10);
+            --border-strong: rgba(255,255,255,0.16);
+            --border-accent: rgba(99,102,241,0.4);
+
+            /* ── Text System ── */
+            --text-primary: #f0f0f3;
+            --text-secondary: #a0a0ab;
+            --text-tertiary: #636370;
+            --text-disabled: #454550;
+
+            /* ── Accent Palette ── */
+            --accent: #818cf8;
+            --accent-hover: #6366f1;
+            --accent-muted: rgba(129,140,248,0.12);
+            --accent-strong: rgba(129,140,248,0.24);
+            --accent-text: #a5b4fc;
+
+            /* ── Semantic Colors ── */
+            --success: #34d399;
+            --success-muted: rgba(52,211,153,0.12);
+            --warning: #fbbf24;
+            --warning-muted: rgba(251,191,36,0.12);
+            --danger: #f87171;
+            --danger-muted: rgba(248,113,113,0.12);
+            --info: #38bdf8;
+            --info-muted: rgba(56,189,248,0.12);
+
+            /* ── Code/Data Colors ── */
+            --code-green: #6ee7b7;
+            --code-blue: #7dd3fc;
+            --code-purple: #c4b5fd;
+
+            /* ── Typography ── */
+            --font-display: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+            --text-xs: 0.75rem;
+            --text-sm: 0.8125rem;
+            --text-base: 0.875rem;
+            --text-md: 0.9375rem;
+            --text-lg: 1.0625rem;
+            --text-xl: 1.25rem;
+            --text-2xl: 1.5rem;
+            --text-3xl: 1.875rem;
+            --text-4xl: 2.25rem;
+
+            /* ── Spacing ── */
+            --space-1: 0.25rem;
+            --space-2: 0.5rem;
+            --space-3: 0.75rem;
+            --space-4: 1rem;
+            --space-5: 1.25rem;
+            --space-6: 1.5rem;
+            --space-8: 2rem;
+            --space-10: 2.5rem;
+            --space-12: 3rem;
+
+            /* ── Radius ── */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-xl: 20px;
+            --radius-full: 9999px;
+
+            /* ── Shadows ── */
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+            --shadow-lg: 0 8px 30px rgba(0,0,0,0.35);
+            --shadow-glow: 0 0 20px rgba(129,140,248,0.15);
+
+            /* ── Motion ── */
+            --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+            --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+            --duration-fast: 150ms;
+            --duration-normal: 250ms;
+            --duration-slow: 400ms;
+            --duration-entrance: 600ms;
         }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #1a1a1a;
-            color: #e0e0e0;
+            font-family: var(--font-body);
+            background: var(--surface-1);
+            color: var(--text-secondary);
             line-height: 1.6;
+            font-size: var(--text-base);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
+        /* ── Shared Nav ── */
+        .wi-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-4) var(--space-8);
+            border-bottom: 1px solid var(--border-subtle);
+            position: sticky;
+            top: 0;
+            background: rgba(15,15,17,0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            z-index: 100;
+        }
+
+        .wi-logo {
+            font-family: var(--font-display);
+            font-size: var(--text-sm);
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        .wi-logo span { color: var(--accent); }
+
+        .wi-nav-links {
+            list-style: none;
+            display: flex;
+            gap: var(--space-6);
+        }
+
+        .wi-nav-link {
+            font-family: var(--font-body);
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color var(--duration-fast) var(--ease-out);
+            font-weight: 500;
+        }
+
+        .wi-nav-link:hover { color: var(--text-primary); }
+        .wi-nav-link.active { color: var(--accent-text); }
+
+        /* ── Layout ── */
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: var(--space-8) var(--space-6);
         }
 
+        /* ── Header ── */
         .header {
-            text-align: center;
-            margin-bottom: 3rem;
-            padding-bottom: 2rem;
-            border-bottom: 2px solid #333;
+            margin-bottom: var(--space-10);
+            padding-bottom: var(--space-8);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .page-eyebrow {
+            font-size: var(--text-xs);
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: var(--space-3);
         }
 
         h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-            color: #fff;
+            font-family: var(--font-display);
+            font-size: var(--text-4xl);
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.025em;
+            margin-bottom: var(--space-2);
         }
 
         .subtitle {
-            color: #888;
-            font-size: 1.1rem;
+            color: var(--text-tertiary);
+            font-size: var(--text-md);
+            max-width: 600px;
         }
 
-        .nav-links {
+        .section-nav {
             display: flex;
-            justify-content: center;
-            gap: 2rem;
-            margin: 2rem 0;
+            gap: var(--space-3);
+            margin-top: var(--space-5);
         }
 
-        .nav-link {
-            color: #0a84ff;
+        .section-nav-link {
+            font-size: var(--text-sm);
+            font-weight: 500;
+            color: var(--accent-text);
             text-decoration: none;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            transition: background 0.2s ease;
+            padding: var(--space-2) var(--space-4);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-accent);
+            background: var(--accent-muted);
+            transition: all var(--duration-fast) var(--ease-out);
         }
 
-        .nav-link:hover {
-            background: rgba(10, 132, 255, 0.1);
+        .section-nav-link:hover {
+            background: var(--accent-strong);
+            border-color: var(--accent);
         }
 
+        /* ── Search ── */
+        .search-box {
+            width: 100%;
+            padding: var(--space-4);
+            background: var(--surface-0);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: var(--text-md);
+            margin-bottom: var(--space-8);
+            transition: border-color var(--duration-fast) var(--ease-out),
+                        box-shadow var(--duration-fast) var(--ease-out);
+        }
+
+        .search-box::placeholder { color: var(--text-disabled); }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-muted);
+        }
+
+        /* ── Sections ── */
         .section {
-            margin-bottom: 3rem;
+            margin-bottom: var(--space-12);
         }
 
         .section-title {
-            font-size: 1.8rem;
-            color: #fff;
-            margin-bottom: 1.5rem;
-            padding-bottom: 0.5rem;
-            border-bottom: 1px solid #333;
+            font-family: var(--font-display);
+            font-size: var(--text-2xl);
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.015em;
+            margin-bottom: var(--space-6);
+            padding-bottom: var(--space-3);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
         }
 
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 1.2em;
+            background: var(--accent);
+            border-radius: var(--radius-full);
+            flex-shrink: 0;
+        }
+
+        /* ── Metric Cards ── */
+        .metric-explanation {
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius-lg);
+            padding: var(--space-6);
+            margin-bottom: var(--space-5);
+            transition: border-color var(--duration-normal) var(--ease-out),
+                        box-shadow var(--duration-normal) var(--ease-out);
+        }
+
+        .metric-explanation:hover {
+            border-color: var(--border-default);
+            border-left-color: var(--accent);
+            box-shadow: var(--shadow-md);
+        }
+
+        .metric-title {
+            font-family: var(--font-display);
+            font-size: var(--text-lg);
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: var(--space-4);
+            letter-spacing: -0.01em;
+        }
+
+        .metric-section {
+            margin-bottom: var(--space-4);
+        }
+
+        .metric-section:last-child { margin-bottom: 0; }
+
+        .metric-label {
+            font-size: var(--text-xs);
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 500;
+            margin-bottom: var(--space-1);
+        }
+
+        .metric-text {
+            color: var(--text-secondary);
+            font-size: var(--text-base);
+            line-height: 1.65;
+        }
+
+        .metric-text strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .metric-text em {
+            color: var(--text-tertiary);
+            font-style: italic;
+        }
+
+        .metric-warning {
+            color: var(--warning);
+            padding: var(--space-3) var(--space-4);
+            background: var(--warning-muted);
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--warning);
+            margin-top: var(--space-2);
+        }
+
+        /* ── Score Tables ── */
+        .score-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: var(--space-3);
+            background: var(--surface-0);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .score-table th {
+            padding: var(--space-3) var(--space-4);
+            text-align: left;
+            font-size: var(--text-xs);
+            color: var(--text-tertiary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            background: var(--surface-0);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .score-table td {
+            padding: var(--space-3) var(--space-4);
+            border-top: 1px solid var(--border-subtle);
+            font-size: var(--text-base);
+            color: var(--text-secondary);
+        }
+
+        .score-table tbody tr:first-child td { border-top: none; }
+
+        .score-table tbody tr:hover {
+            background: var(--surface-3);
+        }
+
+        .score-range {
+            color: var(--accent-text);
+            font-weight: 600;
+            font-family: var(--font-mono);
+            font-size: var(--text-sm);
+        }
+
+        /* ── Glossary Grid ── */
         .glossary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-            gap: 1.5rem;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: var(--space-4);
         }
 
         .glossary-item {
-            background: #242424;
-            border: 1px solid #333;
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: border-color 0.2s ease, transform 0.2s ease;
+            background: var(--surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-5);
+            transition: border-color var(--duration-normal) var(--ease-out),
+                        box-shadow var(--duration-normal) var(--ease-out),
+                        transform var(--duration-normal) var(--ease-out);
         }
 
         .glossary-item:hover {
-            border-color: #0a84ff;
+            border-color: var(--border-default);
+            box-shadow: var(--shadow-md);
             transform: translateY(-2px);
         }
 
         .term {
-            font-size: 1.2rem;
+            font-family: var(--font-display);
+            font-size: var(--text-lg);
             font-weight: 600;
-            color: #0a84ff;
-            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+            margin-bottom: var(--space-2);
         }
 
         .definition {
-            color: #ccc;
-            line-height: 1.6;
+            color: var(--text-secondary);
+            font-size: var(--text-base);
+            line-height: 1.65;
         }
 
+        /* ── Category Badges — color-coded by type ── */
         .category-badge {
             display: inline-block;
-            padding: 0.25rem 0.75rem;
-            background: rgba(10, 132, 255, 0.15);
-            color: #0a84ff;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            margin-top: 0.75rem;
-        }
-
-        .search-box {
-            width: 100%;
-            padding: 1rem;
-            background: #242424;
-            border: 1px solid #333;
-            border-radius: 12px;
-            color: #fff;
-            font-size: 1rem;
-            margin-bottom: 2rem;
-        }
-
-        .search-box:focus {
-            outline: none;
-            border-color: #0a84ff;
-        }
-
-        .metric-explanation {
-            background: #242424;
-            border-left: 4px solid #0a84ff;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .metric-title {
-            font-size: 1.3rem;
-            color: #fff;
-            margin-bottom: 1rem;
-        }
-
-        .metric-section {
-            margin-bottom: 1rem;
-        }
-
-        .metric-label {
-            font-size: 0.85rem;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.25rem;
-        }
-
-        .metric-text {
-            color: #ccc;
-            line-height: 1.6;
-        }
-
-        .score-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-        }
-
-        .score-table th,
-        .score-table td {
-            padding: 0.75rem;
-            text-align: left;
-            border-bottom: 1px solid #333;
-        }
-
-        .score-table th {
-            color: #888;
+            padding: var(--space-1) var(--space-3);
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
             font-weight: 600;
-            font-size: 0.9rem;
+            margin-top: var(--space-3);
+            /* Default fallback */
+            background: var(--accent-muted);
+            color: var(--accent-text);
         }
 
-        .score-table td {
-            color: #ccc;
+        .category-badge[data-category="CSS"],
+        .category-badge[data-category="HTML"] {
+            background: var(--info-muted);
+            color: var(--info);
         }
 
-        .score-range {
-            color: #0a84ff;
-            font-weight: 600;
+        .category-badge[data-category="Design System"],
+        .category-badge[data-category="Typography"] {
+            background: var(--accent-muted);
+            color: var(--accent-text);
+        }
+
+        .category-badge[data-category="Accessibility"] {
+            background: var(--success-muted);
+            color: var(--success);
+        }
+
+        .category-badge[data-category="Security"],
+        .category-badge[data-category="Scoring"] {
+            background: var(--warning-muted);
+            color: var(--warning);
+        }
+
+        .category-badge[data-category="API"],
+        .category-badge[data-category="SEO"] {
+            background: rgba(196,181,253,0.12);
+            color: var(--code-purple);
+        }
+
+        .category-badge[data-category="Responsive Design"],
+        .category-badge[data-category="Visual Hierarchy"],
+        .category-badge[data-category="UI Pattern"] {
+            background: rgba(110,231,183,0.12);
+            color: var(--code-green);
+        }
+
+        .category-badge[data-category="Access Strategy"],
+        .category-badge[data-category="Analysis Method"],
+        .category-badge[data-category="Computer Vision"] {
+            background: var(--danger-muted);
+            color: var(--danger);
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 700px) {
+            .glossary-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .section-nav {
+                flex-wrap: wrap;
+            }
+
+            h1 {
+                font-size: var(--text-3xl);
+            }
+
+            .wi-nav {
+                padding: var(--space-3) var(--space-4);
+            }
+
+            .wi-nav-links {
+                gap: var(--space-4);
+            }
         }
     </style>
 </head>
 <body>
+
+    <nav class="wi-nav">
+        <a class="wi-logo" href="/">Web<span>Intelligence</span></a>
+        <ul class="wi-nav-links">
+            <li><a href="/" class="wi-nav-link">Dashboard</a></li>
+            <li><a href="/ripper" class="wi-nav-link">Ripper</a></li>
+            <li><a href="/glossary" class="wi-nav-link active">Glossary</a></li>
+        </ul>
+    </nav>
+
     <div class="container">
         <div class="header">
-            <h1>📚 Web Inspector Glossary</h1>
-            <p class="subtitle">Comprehensive guide to metrics, scores, and terminology</p>
-
-            <div class="nav-links">
-                <a href="/" class="nav-link">← Back to Inspector</a>
-                <a href="#metrics" class="nav-link">Metrics Guide</a>
-                <a href="#terms" class="nav-link">Terminology</a>
+            <div class="page-eyebrow">Reference</div>
+            <h1>Glossary & Metrics</h1>
+            <p class="subtitle">Comprehensive guide to metrics, scores, and terminology used across the scanner</p>
+            <div class="section-nav">
+                <a href="#metrics" class="section-nav-link">Metrics Guide</a>
+                <a href="#terms" class="section-nav-link">Terminology</a>
             </div>
         </div>
 
-        <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search glossary...">
+        <input type="text" class="search-box" id="searchBox" placeholder="Search glossary...">
 
         <!-- Metrics Guide Section -->
         <div class="section" id="metrics">
-            <h2 class="section-title">📊 Metrics Guide</h2>
+            <h2 class="section-title">Metrics Guide</h2>
 
             <div class="metric-explanation">
                 <div class="metric-title">Spacing Scale</div>
@@ -224,7 +538,7 @@
 
                 <div class="metric-section">
                     <div class="metric-label">Base unit explained</div>
-                    <div class="metric-text">The smallest spacing increment. All other values are multiples of this base (4px → 8px, 16px, 32px).</div>
+                    <div class="metric-text">The smallest spacing increment. All other values are multiples of this base (4px &rarr; 8px, 16px, 32px).</div>
                 </div>
 
                 <div class="metric-section">
@@ -331,8 +645,8 @@
 
                 <div class="metric-section">
                     <div class="metric-label">Why values above 500 are hidden</div>
-                    <div class="metric-text" style="color: #ff9f0a;">
-                        ⚠️ React portals use z-index: 9999, tooltips use 999999. These aren't part of the design system - they're framework noise. We only show meaningful layers (1-500).
+                    <div class="metric-text metric-warning">
+                        React portals use z-index: 9999, tooltips use 999999. These aren't part of the design system - they're framework noise. We only show meaningful layers (1-500).
                     </div>
                 </div>
 
@@ -426,12 +740,12 @@
                 <div class="metric-section">
                     <div class="metric-label">Key elements</div>
                     <div class="metric-text">
-                        • Title tag (unique, 50-60 characters)<br>
-                        • Meta description (155-160 characters)<br>
-                        • Open Graph tags (social media sharing)<br>
-                        • Schema.org markup (rich snippets in search)<br>
-                        • Mobile responsive<br>
-                        • Fast load time (< 3 seconds)
+                        <strong>Title tag:</strong> Unique, 50-60 characters<br>
+                        <strong>Meta description:</strong> 155-160 characters<br>
+                        <strong>Open Graph tags:</strong> Social media sharing<br>
+                        <strong>Schema.org markup:</strong> Rich snippets in search<br>
+                        <strong>Mobile responsive:</strong> Required<br>
+                        <strong>Load time:</strong> Under 3 seconds
                     </div>
                 </div>
             </div>
@@ -477,20 +791,20 @@
                 <div class="metric-section">
                     <div class="metric-label">Categories we detect</div>
                     <div class="metric-text">
-                        • <strong>CSS Variables:</strong> Custom properties (--color-primary, --spacing-base)<br>
-                        • <strong>Flexbox:</strong> Modern layout system<br>
-                        • <strong>Grid:</strong> Advanced 2D layout (grid-template-columns)<br>
-                        • <strong>Custom Properties:</strong> @supports, clamp(), calc()<br>
-                        • <strong>Transforms:</strong> scale(), rotate(), translate()<br>
-                        • <strong>Animations:</strong> @keyframes, transition<br>
-                        • <strong>Filters:</strong> blur(), brightness(), contrast()<br>
-                        • <strong>Blend Modes:</strong> mix-blend-mode
+                        <strong>CSS Variables:</strong> Custom properties (--color-primary, --spacing-base)<br>
+                        <strong>Flexbox:</strong> Modern layout system<br>
+                        <strong>Grid:</strong> Advanced 2D layout (grid-template-columns)<br>
+                        <strong>Custom Properties:</strong> @supports, clamp(), calc()<br>
+                        <strong>Transforms:</strong> scale(), rotate(), translate()<br>
+                        <strong>Animations:</strong> @keyframes, transition<br>
+                        <strong>Filters:</strong> blur(), brightness(), contrast()<br>
+                        <strong>Blend Modes:</strong> mix-blend-mode
                     </div>
                 </div>
 
                 <div class="metric-section">
                     <div class="metric-label">What "947 detected" means</div>
-                    <div class="metric-text" style="color: #ff9f0a;">
+                    <div class="metric-text metric-warning">
                         This is the total count of modern CSS technique instances across the entire page. Click "View All" to see them categorized (e.g., "234 CSS Variables", "187 Flexbox containers").
                     </div>
                 </div>
@@ -499,7 +813,7 @@
 
         <!-- Terminology Section -->
         <div class="section" id="terms">
-            <h2 class="section-title">📖 Terminology</h2>
+            <h2 class="section-title">Terminology</h2>
 
             <div class="glossary-grid" id="glossaryGrid">
                 <!-- Glossary items will be inserted by JavaScript -->
@@ -509,236 +823,49 @@
 
     <script>
         const GLOSSARY = [
-            {
-                term: "Base Unit",
-                definition: "The smallest spacing increment in a design system. All other spacing values are multiples of this base (e.g., 4px base → 8px, 16px, 32px).",
-                category: "Design System"
-            },
-            {
-                term: "Breakpoint",
-                definition: "A screen width where the layout changes to accommodate different device sizes (mobile at 768px, tablet at 1024px, desktop at 1440px).",
-                category: "Responsive Design"
-            },
-            {
-                term: "Computed Style",
-                definition: "The final CSS values after browser calculation (includes inherited values, resolved CSS variables, etc.). Different from inline styles.",
-                category: "CSS"
-            },
-            {
-                term: "Confidence Score",
-                definition: "A 0-100% score indicating how certain we are about pattern detection. Higher score = more consistent pattern. Based on multiple factors.",
-                category: "Scoring"
-            },
-            {
-                term: "CSS Grid",
-                definition: "Modern CSS layout system for creating two-dimensional layouts (both rows AND columns simultaneously). Best for complex dashboards and galleries.",
-                category: "CSS"
-            },
-            {
-                term: "CSS Variable",
-                definition: "Custom CSS property (--variable-name) that can be reused throughout stylesheets. Example: --primary-color: #0a84ff;",
-                category: "CSS"
-            },
-            {
-                term: "Design System",
-                definition: "A collection of reusable components, patterns, and guidelines for consistent design. Examples: Material Design, Ant Design, Carbon.",
-                category: "Design System"
-            },
-            {
-                term: "Elevation",
-                definition: "Visual depth created by box-shadows, making elements appear to float above the page. Used in Material Design for hierarchy.",
-                category: "Design System"
-            },
-            {
-                term: "Flexbox",
-                definition: "CSS layout system for creating one-dimensional layouts (either a row OR a column). Best for navigation bars, card rows, etc.",
-                category: "CSS"
-            },
-            {
-                term: "Modular Scale",
-                definition: "Typography scale based on a mathematical ratio (1.25x, 1.5x, 2x). Creates consistent visual rhythm in headings and text.",
-                category: "Typography"
-            },
-            {
-                term: "Semantic HTML",
-                definition: "HTML tags that convey meaning (header, nav, article, footer) vs generic tags (div, span). Better for accessibility and SEO.",
-                category: "HTML"
-            },
-            {
-                term: "System Font Stack",
-                definition: "List of fonts that uses the operating system's default font for performance. Example: -apple-system, BlinkMacSystemFont, Segoe UI",
-                category: "Typography"
-            },
-            {
-                term: "Z-Index",
-                definition: "CSS property controlling stacking order. Higher values appear on top. Typical hierarchy: content (10) → dropdowns (100) → modals (300).",
-                category: "CSS"
-            },
-            {
-                term: "WCAG",
-                definition: "Web Content Accessibility Guidelines - international standards for accessible websites. AA = good, AAA = excellent.",
-                category: "Accessibility"
-            },
-            {
-                term: "Open Graph",
-                definition: "Meta tags that control how content appears when shared on social media (Facebook, LinkedIn, etc.). Includes title, description, image.",
-                category: "SEO"
-            },
-            {
-                term: "Schema.org",
-                definition: "Structured data markup that helps search engines understand page content. Powers rich snippets (star ratings, prices, etc.) in Google.",
-                category: "SEO"
-            },
-            {
-                term: "CSP",
-                definition: "Content Security Policy - HTTP header that prevents XSS attacks by restricting which content sources are allowed on the page.",
-                category: "Security"
-            },
-            {
-                term: "CORS",
-                definition: "Cross-Origin Resource Sharing - controls which domains can access your API. Prevents unauthorized cross-domain requests.",
-                category: "Security"
-            },
-            {
-                term: "API Endpoint",
-                definition: "A URL that accepts HTTP requests to retrieve or modify data. Example: GET /api/users, POST /api/products",
-                category: "API"
-            },
-            {
-                term: "REST API",
-                definition: "Representational State Transfer - API architecture using HTTP methods (GET, POST, PUT, DELETE) for CRUD operations.",
-                category: "API"
-            },
-            {
-                term: "GraphQL",
-                definition: "Query language for APIs that lets clients request exactly the data they need. Alternative to REST with more flexibility.",
-                category: "API"
-            },
-            {
-                term: "MRI Mode",
-                definition: "Metadata Radiological Inspection - graceful degradation mode when full access is blocked. Extracts meta tags, frameworks, structure.",
-                category: "Access Strategy"
-            },
-            {
-                term: "Bot Protection",
-                definition: "Systems like Cloudflare, PerimeterX that block automated tools. Triggers MRI mode for metadata-only extraction.",
-                category: "Access Strategy"
-            },
-            {
-                term: "DOM Depth",
-                definition: "How many levels of nested HTML elements exist. Think of it like folders within folders. Shallow (≤10) = simple, deep (>20) = complex. Typical sites: 10-15 levels.",
-                category: "HTML"
-            },
-            {
-                term: "Nesting Level",
-                definition: "How deep an element is within the HTML tree. Example: html > body > div > section > p = 5 levels deep. Affects performance and maintainability.",
-                category: "HTML"
-            },
-            {
-                term: "Blur Radius",
-                definition: "How soft/blurry a shadow edge is. 0px = sharp edge, 5px = subtle, 15px = elevated (cards), 30px = floating (modals). Bigger blur = higher perceived elevation.",
-                category: "Design System"
-            },
-            {
-                term: "Y-Offset",
-                definition: "Vertical distance a shadow is cast from the element. Small (2-4px) = subtle depth, large (10-20px) = dramatic elevation. Works with blur radius.",
-                category: "Design System"
-            },
-            {
-                term: "Focus State",
-                definition: "Visual style when element has keyboard focus (tab key). Required for accessibility. Example: blue outline on buttons, underline on links.",
-                category: "Accessibility"
-            },
-            {
-                term: "Active Selector",
-                definition: "CSS selector that targets an element being clicked/pressed. Example: button:active. Shows feedback during user interaction.",
-                category: "CSS"
-            },
-            {
-                term: "Hover State",
-                definition: "Visual change when mouse cursor is over an element. Example: button changes color, link underlines. Not available on touch devices.",
-                category: "CSS"
-            },
-            {
-                term: "Viewport",
-                definition: "The visible area of your browser window. Mobile = small (375px), tablet = medium (768px), desktop = large (1280px+). Sites adapt to viewport size.",
-                category: "Responsive Design"
-            },
-            {
-                term: "Breakpoint",
-                definition: "Screen width where layout changes. Common: 640px (mobile), 768px (tablet), 1024px (laptop), 1280px (desktop). Defined in @media queries.",
-                category: "Responsive Design"
-            },
-            {
-                term: "Visual Weight",
-                definition: "How much an element grabs attention. Determined by: size, color contrast, position, whitespace. Higher weight = eye goes there first.",
-                category: "Design System"
-            },
-            {
-                term: "Base Unit",
-                definition: "Foundation spacing value that other spacing multiples of. If base = 8px, scale is 8, 16, 24, 32, 48, 64px. Creates visual rhythm.",
-                category: "Design System"
-            },
-            {
-                term: "Heuristic",
-                definition: "A rule of thumb or educated guess. Heuristic detection uses patterns and common conventions rather than perfect analysis. Fast but not 100% accurate.",
-                category: "Analysis Method"
-            },
-            {
-                term: "Confidence Score",
-                definition: "How certain the tool is (0-100%). High (80%+) = very reliable, Medium (60-79%) = probably correct, Low (<60%) = uncertain, verify manually.",
-                category: "Scoring"
-            },
-            {
-                term: "Edge Density",
-                definition: "How many sharp lines/borders exist in an area (detected via computer vision). High edge density = detailed/complex, low = simple/minimal.",
-                category: "Computer Vision"
-            },
-            {
-                term: "Contrast",
-                definition: "Difference between colors. High contrast = easy to read (black on white). Low contrast = hard to read (light gray on white). WCAG requires 4.5:1 for text.",
-                category: "Accessibility"
-            },
-            {
-                term: "Whitespace",
-                definition: "Empty space around elements. More whitespace = clean/breathable design, less = dense/cramped. Also called 'negative space'.",
-                category: "Design System"
-            },
-            {
-                term: "Optical Center",
-                definition: "Where your eye naturally looks first on a page. Usually 33% from top, centered horizontally (F-pattern reading). Important for hero placement.",
-                category: "Visual Hierarchy"
-            },
-            {
-                term: "Snackbar",
-                definition: "Brief message that appears at bottom of screen, then disappears. Named after Android's UI pattern. Example: 'Message sent' confirmation.",
-                category: "UI Pattern"
-            },
-            {
-                term: "Dropdown Menu",
-                definition: "Menu that appears when clicking a trigger (usually nav item or button). Requires JavaScript to toggle open/closed state.",
-                category: "UI Pattern"
-            },
-            {
-                term: "Modal",
-                definition: "Popup dialog that dims the background and requires user action before continuing. High z-index (usually 1000+) to appear on top of everything.",
-                category: "UI Pattern"
-            },
-            {
-                term: "Accordion",
-                definition: "Collapsible sections where clicking header expands/collapses content. Only one section open at a time. Common in FAQs.",
-                category: "UI Pattern"
-            },
-            {
-                term: "Hamburger Menu",
-                definition: "Three horizontal lines icon (≡) that opens mobile navigation. Typically hidden on desktop, visible on mobile < 768px.",
-                category: "UI Pattern"
-            },
-            {
-                term: "Hero Section",
-                definition: "Large banner at top of page with key message/image. First thing users see. Usually includes heading, description, and CTA button.",
-                category: "UI Pattern"
-            }
+            { term: "Base Unit", definition: "The smallest spacing increment in a design system. All other spacing values are multiples of this base (e.g., 4px base \u2192 8px, 16px, 32px).", category: "Design System" },
+            { term: "Breakpoint", definition: "A screen width where the layout changes to accommodate different device sizes (mobile at 768px, tablet at 1024px, desktop at 1440px).", category: "Responsive Design" },
+            { term: "Computed Style", definition: "The final CSS values after browser calculation (includes inherited values, resolved CSS variables, etc.). Different from inline styles.", category: "CSS" },
+            { term: "Confidence Score", definition: "A 0-100% score indicating how certain we are about pattern detection. Higher score = more consistent pattern. Based on multiple factors.", category: "Scoring" },
+            { term: "CSS Grid", definition: "Modern CSS layout system for creating two-dimensional layouts (both rows AND columns simultaneously). Best for complex dashboards and galleries.", category: "CSS" },
+            { term: "CSS Variable", definition: "Custom CSS property (--variable-name) that can be reused throughout stylesheets. Example: --primary-color: #818cf8;", category: "CSS" },
+            { term: "Design System", definition: "A collection of reusable components, patterns, and guidelines for consistent design. Examples: Material Design, Ant Design, Carbon.", category: "Design System" },
+            { term: "Elevation", definition: "Visual depth created by box-shadows, making elements appear to float above the page. Used in Material Design for hierarchy.", category: "Design System" },
+            { term: "Flexbox", definition: "CSS layout system for creating one-dimensional layouts (either a row OR a column). Best for navigation bars, card rows, etc.", category: "CSS" },
+            { term: "Modular Scale", definition: "Typography scale based on a mathematical ratio (1.25x, 1.5x, 2x). Creates consistent visual rhythm in headings and text.", category: "Typography" },
+            { term: "Semantic HTML", definition: "HTML tags that convey meaning (header, nav, article, footer) vs generic tags (div, span). Better for accessibility and SEO.", category: "HTML" },
+            { term: "System Font Stack", definition: "List of fonts that uses the operating system's default font for performance. Example: -apple-system, BlinkMacSystemFont, Segoe UI", category: "Typography" },
+            { term: "Z-Index", definition: "CSS property controlling stacking order. Higher values appear on top. Typical hierarchy: content (10) \u2192 dropdowns (100) \u2192 modals (300).", category: "CSS" },
+            { term: "WCAG", definition: "Web Content Accessibility Guidelines - international standards for accessible websites. AA = good, AAA = excellent.", category: "Accessibility" },
+            { term: "Open Graph", definition: "Meta tags that control how content appears when shared on social media (Facebook, LinkedIn, etc.). Includes title, description, image.", category: "SEO" },
+            { term: "Schema.org", definition: "Structured data markup that helps search engines understand page content. Powers rich snippets (star ratings, prices, etc.) in Google.", category: "SEO" },
+            { term: "CSP", definition: "Content Security Policy - HTTP header that prevents XSS attacks by restricting which content sources are allowed on the page.", category: "Security" },
+            { term: "CORS", definition: "Cross-Origin Resource Sharing - controls which domains can access your API. Prevents unauthorized cross-domain requests.", category: "Security" },
+            { term: "API Endpoint", definition: "A URL that accepts HTTP requests to retrieve or modify data. Example: GET /api/users, POST /api/products", category: "API" },
+            { term: "REST API", definition: "Representational State Transfer - API architecture using HTTP methods (GET, POST, PUT, DELETE) for CRUD operations.", category: "API" },
+            { term: "GraphQL", definition: "Query language for APIs that lets clients request exactly the data they need. Alternative to REST with more flexibility.", category: "API" },
+            { term: "MRI Mode", definition: "Metadata Radiological Inspection - graceful degradation mode when full access is blocked. Extracts meta tags, frameworks, structure.", category: "Access Strategy" },
+            { term: "Bot Protection", definition: "Systems like Cloudflare, PerimeterX that block automated tools. Triggers MRI mode for metadata-only extraction.", category: "Access Strategy" },
+            { term: "DOM Depth", definition: "How many levels of nested HTML elements exist. Think of it like folders within folders. Shallow (\u226410) = simple, deep (>20) = complex. Typical sites: 10-15 levels.", category: "HTML" },
+            { term: "Nesting Level", definition: "How deep an element is within the HTML tree. Example: html > body > div > section > p = 5 levels deep. Affects performance and maintainability.", category: "HTML" },
+            { term: "Blur Radius", definition: "How soft/blurry a shadow edge is. 0px = sharp edge, 5px = subtle, 15px = elevated (cards), 30px = floating (modals). Bigger blur = higher perceived elevation.", category: "Design System" },
+            { term: "Y-Offset", definition: "Vertical distance a shadow is cast from the element. Small (2-4px) = subtle depth, large (10-20px) = dramatic elevation. Works with blur radius.", category: "Design System" },
+            { term: "Focus State", definition: "Visual style when element has keyboard focus (tab key). Required for accessibility. Example: blue outline on buttons, underline on links.", category: "Accessibility" },
+            { term: "Active Selector", definition: "CSS selector that targets an element being clicked/pressed. Example: button:active. Shows feedback during user interaction.", category: "CSS" },
+            { term: "Hover State", definition: "Visual change when mouse cursor is over an element. Example: button changes color, link underlines. Not available on touch devices.", category: "CSS" },
+            { term: "Viewport", definition: "The visible area of your browser window. Mobile = small (375px), tablet = medium (768px), desktop = large (1280px+). Sites adapt to viewport size.", category: "Responsive Design" },
+            { term: "Visual Weight", definition: "How much an element grabs attention. Determined by: size, color contrast, position, whitespace. Higher weight = eye goes there first.", category: "Design System" },
+            { term: "Heuristic", definition: "A rule of thumb or educated guess. Heuristic detection uses patterns and common conventions rather than perfect analysis. Fast but not 100% accurate.", category: "Analysis Method" },
+            { term: "Edge Density", definition: "How many sharp lines/borders exist in an area (detected via computer vision). High edge density = detailed/complex, low = simple/minimal.", category: "Computer Vision" },
+            { term: "Contrast", definition: "Difference between colors. High contrast = easy to read (black on white). Low contrast = hard to read (light gray on white). WCAG requires 4.5:1 for text.", category: "Accessibility" },
+            { term: "Whitespace", definition: "Empty space around elements. More whitespace = clean/breathable design, less = dense/cramped. Also called 'negative space'.", category: "Design System" },
+            { term: "Optical Center", definition: "Where your eye naturally looks first on a page. Usually 33% from top, centered horizontally (F-pattern reading). Important for hero placement.", category: "Visual Hierarchy" },
+            { term: "Snackbar", definition: "Brief message that appears at bottom of screen, then disappears. Named after Android's UI pattern. Example: 'Message sent' confirmation.", category: "UI Pattern" },
+            { term: "Dropdown Menu", definition: "Menu that appears when clicking a trigger (usually nav item or button). Requires JavaScript to toggle open/closed state.", category: "UI Pattern" },
+            { term: "Modal", definition: "Popup dialog that dims the background and requires user action before continuing. High z-index (usually 1000+) to appear on top of everything.", category: "UI Pattern" },
+            { term: "Accordion", definition: "Collapsible sections where clicking header expands/collapses content. Only one section open at a time. Common in FAQs.", category: "UI Pattern" },
+            { term: "Hamburger Menu", definition: "Three horizontal lines icon that opens mobile navigation. Typically hidden on desktop, visible on mobile < 768px.", category: "UI Pattern" },
+            { term: "Hero Section", definition: "Large banner at top of page with key message/image. First thing users see. Usually includes heading, description, and CTA button.", category: "UI Pattern" }
         ];
 
         // Render glossary items
@@ -749,7 +876,7 @@
             div.innerHTML = `
                 <div class="term">${item.term}</div>
                 <div class="definition">${item.definition}</div>
-                <span class="category-badge">${item.category}</span>
+                <span class="category-badge" data-category="${item.category}">${item.category}</span>
             `;
             grid.appendChild(div);
         });
@@ -760,9 +887,10 @@
             const query = e.target.value.toLowerCase();
             document.querySelectorAll('.glossary-item, .metric-explanation').forEach(item => {
                 const text = item.textContent.toLowerCase();
-                item.style.display = text.includes(query) ? 'block' : 'none';
+                item.style.display = text.includes(query) ? '' : 'none';
             });
         });
     </script>
+
 </body>
 </html>
