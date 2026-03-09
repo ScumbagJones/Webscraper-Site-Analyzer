@@ -4,22 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Intelligence Scanner</title>
-    <!-- Typography: DM Sans (display + body) + JetBrains Mono (code) -->
+    <!-- Typography: Fraunces (display) + DM Sans (body) + JetBrains Mono (code) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         /* ═══════════════════════════════════════════════════════════
            DESIGN TOKENS — Web Intelligence Scanner
            A design tool should look like it was designed.
            ═══════════════════════════════════════════════════════════ */
         :root {
-            /* ── Surface System ── */
-            --surface-0: #0f0f11;
-            --surface-1: #161618;
-            --surface-2: #1c1c20;
-            --surface-3: #242429;
-            --surface-4: #2c2c33;
+            /* ── Surface System (warm charcoal) ── */
+            --surface-0: #111114;
+            --surface-1: #18181c;
+            --surface-2: #1e1e24;
+            --surface-3: #26262e;
+            --surface-4: #2e2e38;
             --surface-overlay: rgba(0,0,0,0.72);
 
             /* ── Border System ── */
@@ -57,7 +57,7 @@
             --code-purple: #c4b5fd;
 
             /* ── Typography ── */
-            --font-display: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-display: 'Fraunces', Georgia, serif;
             --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
             --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 
@@ -85,8 +85,8 @@
             /* ── Radius ── */
             --radius-sm: 6px;
             --radius-md: 10px;
-            --radius-lg: 14px;
-            --radius-xl: 20px;
+            --radius-lg: 18px;
+            --radius-xl: 24px;
             --radius-full: 9999px;
 
             /* ── Shadows ── */
@@ -340,7 +340,7 @@
         .metric-card {
             background: var(--surface-2);
             border-radius: var(--radius-lg);
-            padding: var(--space-5);
+            padding: var(--space-6);
             border: 1px solid var(--border-subtle);
             break-inside: avoid;
             margin-bottom: 0;
@@ -359,9 +359,10 @@
 
         /* ── Compact Card Pattern ── */
         .metric-summary {
+            font-family: var(--font-body);
             font-size: var(--text-sm);
             color: var(--text-secondary);
-            line-height: 1.5;
+            line-height: 1.6;
             margin-bottom: 0;
         }
         .metric-summary .summary-visual {
@@ -1343,8 +1344,9 @@
 
         .category-name {
             font-family: var(--font-display);
-            font-size: var(--text-lg);
+            font-size: var(--text-xl);
             font-weight: 600;
+            letter-spacing: -0.02em;
             color: var(--text-primary);
         }
 
@@ -5751,19 +5753,37 @@
                 return 'Wide';
             }
 
-            // Build visual ruler
+            // Build visual ruler with collision detection
             const maxPx = Math.max(...bpValues, 1536);
+            const RULER_EST_WIDTH = 600; // approx rendered width for gap calc
+            const MIN_LABEL_GAP = 55;    // min px between labels before staggering
+
+            // Build markers with collision detection
+            const markers = bpValues.map(px => ({
+                px,
+                pct: Math.min((px / maxPx) * 100, 98),
+                label: deviceLabel(px),
+                stagger: false
+            }));
+            // Detect collisions — stagger overlapping labels to bottom row
+            markers.forEach((m, i) => {
+                if (i > 0) {
+                    const gap = (m.pct - markers[i - 1].pct) / 100 * RULER_EST_WIDTH;
+                    if (gap < MIN_LABEL_GAP) m.stagger = true;
+                }
+            });
+
             const rulerHTML = bpValues.length > 0 ? `
-                <div style="position:relative; height:56px; margin:var(--space-4) 0 var(--space-2);">
+                <div style="position:relative; height:${markers.some(m => m.stagger) ? '72px' : '56px'}; margin:var(--space-4) 0 var(--space-2);">
                     <!-- Ruler bar -->
                     <div style="position:absolute; top:18px; left:0; right:0; height:4px; background:var(--surface-3); border-radius:2px;"></div>
-                    ${bpValues.map(px => {
-                        const pct = Math.min((px / maxPx) * 100, 98);
+                    ${markers.map(m => {
+                        const topPos = m.stagger ? '30px' : '0';
                         return `
-                            <div style="position:absolute; left:${pct}%; transform:translateX(-50%); text-align:center; top:0;">
-                                <div style="font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap;">${deviceLabel(px)}</div>
+                            <div style="position:absolute; left:${m.pct}%; transform:translateX(-50%); text-align:center; top:${topPos};">
+                                <div style="font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap;">${m.stagger ? '' : m.label}</div>
                                 <div style="width:2px; height:12px; background:var(--accent); margin:2px auto;"></div>
-                                <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-secondary); white-space:nowrap;">${px}px</div>
+                                <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-secondary); white-space:nowrap;">${m.px}px</div>
                             </div>
                         `;
                     }).join('')}
@@ -6251,9 +6271,12 @@
                 const zB = b[1].z_index || parseInt(b[0].match(/\d+/)?.[0] || '0');
                 return zA - zB;
             });
+            const MAX_DISPLAY_LAYERS = 12;
+            const hiddenLayerCount = Math.max(0, sortedLayers.length - MAX_DISPLAY_LAYERS);
+            const displayLayers = hiddenLayerCount > 0 ? sortedLayers.slice(-MAX_DISPLAY_LAYERS) : sortedLayers; // keep top layers
             const zValues = sortedLayers.map(([n, info]) => info.z_index || parseInt(n.match(/\d+/)?.[0] || '0'));
             const maxZ = Math.max(...zValues, 1);
-            const stackHeight = Math.max(180, Math.min(360, 60 + sortedLayers.length * 36));
+            const stackHeight = Math.max(180, Math.min(360, 60 + displayLayers.length * 36));
             const zTooltipId = 'z-tooltip-' + Math.random().toString(36).slice(2, 8);
 
             const visualStackHTML = `
@@ -6277,17 +6300,20 @@
                         <div style="position: absolute; bottom: -16px; left: 0; font-size: 0.6rem; color: #555;">z: auto</div>
                         <!-- Tooltip -->
                         <div id="${zTooltipId}" style="display: none; position: absolute; right: 0; background: rgba(10,10,10,0.95); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 0.5rem 0.7rem; font-size: 0.68rem; color: #ccc; z-index: 100; max-width: 260px; pointer-events: none;"></div>
-                        ${sortedLayers.map(([name, info], i) => {
+                        ${hiddenLayerCount > 0 ? `
+                            <div style="position:absolute; bottom:0; left:48px; font-size:0.65rem; color:var(--text-disabled); font-style:italic;">+${hiddenLayerCount} more layer${hiddenLayerCount !== 1 ? 's' : ''} below</div>
+                        ` : ''}
+                        ${displayLayers.map(([name, info], i) => {
                             const z = info.z_index || parseInt(name.match(/\d+/)?.[0] || '0');
                             const c = getLayerColor(name);
                             const count = info.visible_count || info.count || 0;
                             const interCount = info.interactive_count || 0;
                             const shortLabel = name.includes(': ') ? name.split(': ').slice(1).join(': ') : name;
                             // Log-scale for vertical position (compress large jumps)
-                            const useLog = sortedLayers.length > 3 && maxZ > 100;
+                            const useLog = displayLayers.length > 3 && maxZ > 100;
                             const pos = useLog
                                 ? Math.log(z + 1) / Math.log(maxZ + 1)
-                                : (sortedLayers.length <= 1 ? 0.5 : i / (sortedLayers.length - 1));
+                                : (displayLayers.length <= 1 ? 0.5 : i / (displayLayers.length - 1));
                             const bottomPx = Math.round(pos * (stackHeight - 32)) + 4;
                             // Build tooltip content (elements)
                             const els = (info.elements || []).filter(el => el.isVisible !== false).slice(0, 3);
@@ -8048,19 +8074,86 @@
                 </div>
             `;
 
-            // ── Side-by-side easing comparison (top 3 curves) ──
-            const topCurves = curves.slice(0, 3);
+            // ── Smart curve selection: signature / linear / most extreme ──
+            function bezierDeviation(cssValue) {
+                const m = (cssValue || '').match(/cubic-bezier\(([^)]+)\)/);
+                if (!m) return 0;
+                const parts = m[1].split(',').map(Number);
+                if (parts.length < 4) return 0;
+                const [x1, y1, x2, y2] = parts;
+                return Math.abs(y1 - x1) + Math.abs(y2 - x2);
+            }
+            function pickRepresentativeCurves(allCurves) {
+                if (allCurves.length <= 3) return allCurves.map((c, i) => ({...c, _role: ['Most used', 'Baseline', 'Contrast'][i] || ''}));
+                // 1. Signature = most-used
+                const sorted = [...allCurves].sort((a, b) => (b.count || 0) - (a.count || 0));
+                const signature = sorted[0];
+                // 2. Linear baseline
+                const linear = allCurves.find(c => (c.value || '').includes('linear'))
+                    || allCurves.find(c => c.role === 'CONSTANT')
+                    || { value: 'linear', known_as: 'linear', count: 0 };
+                // 3. Most extreme (highest deviation from linear)
+                const extreme = [...allCurves]
+                    .filter(c => c !== signature && c !== linear)
+                    .sort((a, b) => bezierDeviation(b.value) - bezierDeviation(a.value))[0]
+                    || sorted[2] || sorted[1];
+                signature._role = 'Most used';
+                linear._role = 'Linear baseline';
+                extreme._role = 'Most dramatic';
+                return [signature, linear, extreme];
+            }
+
+            // ── Bezier evaluation (De Casteljau) for frame visualization ──
+            function evaluateBezier(t, cssValue) {
+                const m = (cssValue || '').match(/cubic-bezier\(([^)]+)\)/);
+                if (!m) return t; // linear
+                const parts = m[1].split(',').map(Number);
+                if (parts.length < 4) return t;
+                const [x1, y1, x2, y2] = parts;
+                // Newton-Raphson to find t_bezier for given t (time)
+                let guess = t;
+                for (let i = 0; i < 8; i++) {
+                    const bx = 3*x1*(1-guess)*(1-guess)*guess + 3*x2*(1-guess)*guess*guess + guess*guess*guess;
+                    const dx = 3*x1*(1-2*guess+guess*guess) + 6*x2*guess*(1-guess) + 3*guess*guess - 3*x1*guess*(2-3*guess);
+                    const slope = 3*(1-guess)*(1-guess)*x1 + 6*(1-guess)*guess*(x2-x1) + 3*guess*guess*(1-x2);
+                    if (Math.abs(slope) < 1e-6) break;
+                    guess -= (bx - t) / slope;
+                    guess = Math.max(0, Math.min(1, guess));
+                }
+                // Evaluate y at found guess
+                return 3*(1-guess)*(1-guess)*guess*y1 + 3*(1-guess)*guess*guess*y2 + guess*guess*guess;
+            }
+
+            function createFrameDots(cssValue, label) {
+                const FRAMES = 30;
+                let dots = '';
+                for (let i = 0; i < FRAMES; i++) {
+                    const t = i / (FRAMES - 1);
+                    const pos = evaluateBezier(t, cssValue);
+                    dots += `<div style="position:absolute; left:${pos * 100}%; width:8px; height:8px; border-radius:50%; background:var(--accent); opacity:0.22; transform:translateX(-50%);"></div>`;
+                }
+                return `
+                    <div style="position:relative; height:20px; margin:var(--space-1) 0;">
+                        ${dots}
+                    </div>
+                    <div style="font-size:0.6rem; color:var(--text-disabled); text-align:center;">${label}</div>
+                `;
+            }
+
+            const topCurves = pickRepresentativeCurves(curves);
             const comparisonHTML = topCurves.length > 0 ? `
                 <div style="display:flex; gap:var(--space-3); margin:var(--space-3) 0; padding:var(--space-3); background:var(--surface-0); border-radius:var(--radius-md);">
                     ${topCurves.map(c => {
                         const cssVal = (c.value || '').trim();
                         const label = c.known_as || c.role || cssVal.substring(0, 20);
+                        const roleLabel = c._role || '';
                         return `
                         <div style="flex:1; text-align:center;">
                             <div style="height:40px; display:flex; align-items:center; justify-content:flex-start; overflow:hidden; margin-bottom:var(--space-1);">
                                 <div style="width:40px; height:40px; background:var(--accent); border-radius:var(--radius-sm); animation:motionDemo 2s ${cssVal} infinite alternate; flex-shrink:0;"></div>
                             </div>
-                            <div style="font-family:var(--font-mono); font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${label}</div>
+                            ${createFrameDots(cssVal, roleLabel)}
+                            <div style="font-family:var(--font-mono); font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:var(--space-1);">${label}</div>
                             <div style="font-size:0.6rem; color:var(--text-disabled);">${c.count||0}x</div>
                         </div>`;
                     }).join('')}

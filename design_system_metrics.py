@@ -387,8 +387,11 @@ class DesignSystemMetrics:
 
         # Build levelled output: sort by usage, assign semantic names
         total_instances = sum(entry['count'] for entry in result.values())
-        levels = []
 
+        # Collect all blur radii for relative naming
+        all_blurs = [self._extract_blur(css) for css in result.keys()]
+
+        levels = []
         for css_value, entry in sorted(result.items(), key=lambda x: x[1]['count'], reverse=True):
             blur = self._extract_blur(css_value)
             levels.append({
@@ -397,7 +400,7 @@ class DesignSystemMetrics:
                 'usage_pct': round((entry['count'] / total_instances) * 100, 1),
                 'selectors': entry['selectors'],
                 'blur_radius': blur,
-                'name': self._shadow_semantic_name(blur)
+                'name': self._shadow_semantic_name(blur, all_blurs)
             })
 
         # Build the scale dict keyed by semantic name for the dashboard card
@@ -438,8 +441,13 @@ class DesignSystemMetrics:
         match = re.search(r'(\d+)px\s+(\d+)px\s+(\d+)px', shadow_css)
         return int(match.group(3)) if match else 0
 
-    def _shadow_semantic_name(self, blur: int) -> str:
-        """Map blur radius → human-readable elevation name."""
+    def _shadow_semantic_name(self, blur: int, all_blurs: list = None) -> str:
+        """Map blur radius → human-readable elevation name.
+        Uses relative distribution when multiple shadows exist,
+        falls back to absolute thresholds for ≤2 shadows."""
+        if all_blurs and len(all_blurs) > 2:
+            return self._shadow_name_relative(blur, all_blurs)
+        # Absolute fallback for sites with very few shadows
         if blur <= 2:
             return 'Subtle'
         elif blur <= 6:
@@ -449,7 +457,26 @@ class DesignSystemMetrics:
         elif blur <= 30:
             return 'Floating'
         else:
-            return 'Modal'
+            return 'Deep'
+
+    def _shadow_name_relative(self, blur: int, all_blurs: list) -> str:
+        """Assign name based on position within the site's own shadow range.
+        Ensures each tier gets a distinct label even when blur values cluster."""
+        unique_sorted = sorted(set(all_blurs))
+        if len(unique_sorted) <= 1:
+            return 'Default'
+        rank = unique_sorted.index(blur)
+        pct = rank / (len(unique_sorted) - 1)  # 0.0 to 1.0
+        if pct <= 0.2:
+            return 'Subtle'
+        elif pct <= 0.4:
+            return 'Card'
+        elif pct <= 0.6:
+            return 'Elevated'
+        elif pct <= 0.8:
+            return 'Heavy'
+        else:
+            return 'Deep'
 
     async def extract_z_index_stack(self) -> Dict:
         """
@@ -505,10 +532,17 @@ class DesignSystemMetrics:
             }
         }
 
+    # Common CSS framework prefixes that obscure meaning
+    _FRAMEWORK_PREFIXES = (
+        'Mui', 'mui-', 'css-', 'tw-', 'sc-', 'chakra-', 'ant-',
+        'v-', 'el-', 'bp3-', 'bp4-', 'mantine-', 'rs-', 'semi-',
+    )
+
     @staticmethod
     def _smart_label(el: Dict) -> str:
         """Generate a human-readable label for a z-index element.
-        Priority: aria-label > id > role > first meaningful class > tag"""
+        Priority: aria-label > id > role > first meaningful class > tag.
+        Strips common framework prefixes from class names."""
         if el.get('ariaLabel'):
             label = el['ariaLabel']
             return label[:40] if len(label) > 40 else label
@@ -518,9 +552,15 @@ class DesignSystemMetrics:
             return f"{el['tag']}[role={el['role']}]"
         classes = el.get('classes', '')
         if classes:
-            # Take first meaningful class (skip utility prefixes)
             first_class = classes.split()[0] if isinstance(classes, str) else ''
             if first_class:
+                # Strip framework prefixes for cleaner labels
+                for prefix in DesignSystemMetrics._FRAMEWORK_PREFIXES:
+                    if first_class.startswith(prefix):
+                        remainder = first_class[len(prefix):]
+                        if remainder:
+                            first_class = remainder
+                            break
                 return f"{el['tag']}.{first_class[:30]}"
         return el.get('tag', 'div')
 
