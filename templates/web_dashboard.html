@@ -357,6 +357,57 @@
             grid-column: 1 / -1;
         }
 
+        /* ── Compact Card Pattern ── */
+        .metric-summary {
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 0;
+        }
+        .metric-summary .summary-visual {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            margin-top: var(--space-2);
+        }
+        .metric-body {
+            display: none;
+            margin-top: var(--space-4);
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--border-subtle);
+        }
+        .metric-card.expanded .metric-body {
+            display: block;
+        }
+        .expand-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-1);
+            width: 100%;
+            margin-top: var(--space-3);
+            padding: var(--space-2) 0;
+            background: none;
+            border: none;
+            border-top: 1px solid var(--border-subtle);
+            color: var(--text-disabled);
+            font-family: var(--font-body);
+            font-size: var(--text-xs);
+            cursor: pointer;
+            transition: color var(--duration-fast) var(--ease-out);
+        }
+        .expand-toggle:hover {
+            color: var(--text-secondary);
+        }
+        .expand-toggle .chevron {
+            display: inline-block;
+            transition: transform var(--duration-fast) var(--ease-out);
+            font-size: 0.7rem;
+        }
+        .metric-card.expanded .expand-toggle .chevron {
+            transform: rotate(180deg);
+        }
+
         .metric-header {
             display: flex;
             justify-content: space-between;
@@ -440,13 +491,18 @@
             margin-left: auto;
         }
 
-        /* Card dimming when below threshold */
+        /* Card hiding when below confidence threshold */
         .metric-card.conf-suppressed {
+            display: none;
+        }
+        /* When "show all" is toggled, reveal suppressed cards dimmed */
+        .metrics-grid.show-all-metrics .metric-card.conf-suppressed {
+            display: block;
             opacity: 0.28;
             filter: grayscale(0.6);
             pointer-events: none;
         }
-        .metric-card.conf-suppressed:hover {
+        .metrics-grid.show-all-metrics .metric-card.conf-suppressed:hover {
             transform: none;
             box-shadow: none;
         }
@@ -2264,10 +2320,12 @@
                 <!-- Confidence filter toolbar (shown after results load) -->
                 <div class="confidence-filter-bar" id="confidenceFilterBar">
                     <label for="confThresholdSlider">Hide metrics below</label>
-                    <input type="range" id="confThresholdSlider" min="0" max="95" step="5" value="0">
-                    <span class="conf-threshold-value" id="confThresholdValue">0%</span>
+                    <input type="range" id="confThresholdSlider" min="0" max="95" step="5" value="40">
+                    <span class="conf-threshold-value" id="confThresholdValue">40%</span>
                     <span class="conf-hidden-count" id="confHiddenCount"></span>
                     <button onclick="resetConfidenceFilter()" style="font-size:var(--text-xs); color:var(--text-tertiary); background:none; border:none; cursor:pointer; padding:0 var(--space-2);">Reset</button>
+                    <span style="width:1px; height:16px; background:var(--border-subtle); margin:0 var(--space-1);"></span>
+                    <button id="expandCollapseBtn" onclick="toggleExpandAll()" style="font-size:var(--text-xs); color:var(--text-tertiary); background:none; border:1px solid var(--border-default); border-radius:var(--radius-sm); cursor:pointer; padding:var(--space-1) var(--space-3); font-family:var(--font-body); white-space:nowrap;">Expand All</button>
                 </div>
 
                 <!-- Results layout: sticky sidebar + main content -->
@@ -5174,8 +5232,6 @@
 
             if (highValueCards.includes(title)) {
                 card.classList.add('large');
-            } else if (mediumValueCards.includes(title)) {
-                // Keep default size but could add 'medium' class for future styling
             }
 
             const confidenceClass = data.confidence >= 80 ? 'high' : data.confidence >= 60 ? 'medium' : 'low';
@@ -5186,165 +5242,339 @@
                 : 0;
             card.dataset.confidence = confNum;
 
-            // Special rendering for design system metrics
+            // ── Generate card body content via existing builders ──
+            let bodyHTML = '';
             if (title === 'Spacing Scale') {
-                card.innerHTML = createSpacingScaleCard(icon, title, data, confidenceClass);
+                bodyHTML = createSpacingScaleCard(icon, title, data, confidenceClass);
             } else if (title === 'Responsive Breakpoints') {
-                card.innerHTML = createBreakpointsCard(icon, title, data, confidenceClass);
+                bodyHTML = createBreakpointsCard(icon, title, data, confidenceClass);
             } else if (title === 'Shadow System') {
-                card.innerHTML = createShadowCard(icon, title, data, confidenceClass);
+                bodyHTML = createShadowCard(icon, title, data, confidenceClass);
             } else if (title === 'Z-Index Stack') {
-                card.innerHTML = createZIndexCard(icon, title, data, confidenceClass);
+                bodyHTML = createZIndexCard(icon, title, data, confidenceClass);
             } else if (title === 'Border Radius') {
-                card.innerHTML = createBorderRadiusCard(icon, title, data, confidenceClass);
+                bodyHTML = createBorderRadiusCard(icon, title, data, confidenceClass);
             } else if (title === 'DOM Depth') {
-                card.innerHTML = createDOMDepthCard(icon, title, data, confidenceClass);
+                bodyHTML = createDOMDepthCard(icon, title, data, confidenceClass);
             } else if (title === 'Typography') {
-                card.innerHTML = createTypographyCard(icon, title, data, confidenceClass);
+                bodyHTML = createTypographyCard(icon, title, data, confidenceClass);
             } else if (title === 'Color Palette') {
-                // Special handling for Color Palette with swatch preview
-                // Get colors from palette.primary and palette.secondary (actual structure)
-                const primaryColors = data.palette?.primary || [];
-                const secondaryColors = data.palette?.secondary || [];
-                const allColors = [...primaryColors, ...secondaryColors];
-
-                // Clean up colors (remove invalid/complex values)
-                const cleanColors = allColors.filter(c => {
-                    return c && typeof c === 'string' && (
-                        c.startsWith('#') ||
-                        c.startsWith('rgb') ||
-                        c.startsWith('hsl')
-                    ) && !c.includes(' rgb') // Skip multi-value strings like "rgb() rgb()"
-                });
-
-                const colorSwatchesHTML = cleanColors.slice(0, 8).map(color => `
-                    <div style="display: inline-flex; flex-direction: column; align-items: center; margin: 0.5rem;">
-                        <div style="width: 48px; height: 48px; background: ${color}; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 0.5rem;" title="${color}"></div>
-                        <span style="font-size: 0.75rem; color: #888; font-family: 'SF Mono', monospace; max-width: 80px; overflow: hidden; text-overflow: ellipsis;">${color.length > 15 ? color.substring(0, 12) + '...' : color}</span>
-                    </div>
-                `).join('');
-
-                card.innerHTML = `
-                    <div class="metric-header">
-                        <div class="metric-title">
-                            <span class="metric-icon">${icon}</span>
-                            ${title}
-                        </div>
-                        ${data.confidence ? `<div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>` : ''}
-                    </div>
-                    <div class="metric-value">${data.pattern}</div>
-                    ${colorSwatchesHTML ? `
-                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem;">
-                            ${colorSwatchesHTML}
-                        </div>
-                    ` : ''}
-                    ${cleanColors.length > 8 ? `
-                        <div style="margin-top: 1rem; padding: 0.75rem; background: rgba(10,132,255,0.1); border-radius: 6px; color: #0a84ff; font-size: 0.85rem;">
-                            +${cleanColors.length - 8} more colors detected
-                        </div>
-                    ` : ''}
-                    ${data.color_roles && Object.keys(data.color_roles).length > 0 ? `
-                        <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.75rem;">
-                            <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Semantic Roles</div>
-                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                                ${Object.entries(data.color_roles).map(([role, hex]) => `
-                                    <div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 4px 10px;">
-                                        <div style="width: 16px; height: 16px; border-radius: 4px; background: ${hex}; border: 1px solid rgba(255,255,255,0.15); flex-shrink: 0;"></div>
-                                        <span style="font-size: 0.75rem; color: #aaa;">${role.replace(/_/g, ' ')}</span>
-                                        <span style="font-size: 0.68rem; color: #666; font-family: 'SF Mono', monospace;">${hex}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-                    ${data.preview?.wcag_compliance ? `
-                        <div style="margin-top: 1rem; padding: 0.75rem; background: #0a0a0a; border-radius: 6px;">
-                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: #fff;">WCAG Compliance</div>
-                            <div style="color: #00ff88; font-size: 0.85rem;">
-                                ✓ ${data.preview.accessible_pairs?.length || 0} accessible color pairs found
-                            </div>
-                        </div>
-                    ` : ''}
-                `;
+                bodyHTML = createColorPaletteCardBody(icon, title, data, confidenceClass);
             } else if (title === 'Interactive Elements') {
-                card.innerHTML = createInteractiveElementsCard(icon, title, data, confidenceClass);
+                bodyHTML = createInteractiveElementsCard(icon, title, data, confidenceClass);
             } else if (title === 'Animations') {
-                card.innerHTML = createAnimationsCard(icon, title, data, confidenceClass);
+                bodyHTML = createAnimationsCard(icon, title, data, confidenceClass);
             } else if (title === 'Performance') {
-                card.innerHTML = createPerformanceCard(icon, title, data, confidenceClass);
+                bodyHTML = createPerformanceCard(icon, title, data, confidenceClass);
             } else if (title === 'Layout System') {
-                card.innerHTML = createLayoutSystemCard(icon, title, data, confidenceClass);
+                bodyHTML = createLayoutSystemCard(icon, title, data, confidenceClass);
             } else if (title === 'SEO') {
-                card.innerHTML = createSEOCard(icon, title, data, confidenceClass);
+                bodyHTML = createSEOCard(icon, title, data, confidenceClass);
             } else if (title === 'Security') {
-                card.innerHTML = createSecurityCard(icon, title, data, confidenceClass);
+                bodyHTML = createSecurityCard(icon, title, data, confidenceClass);
             } else if (title === 'Third-Party') {
-                card.innerHTML = createThirdPartyCard(icon, title, data, confidenceClass);
+                bodyHTML = createThirdPartyCard(icon, title, data, confidenceClass);
             } else if (title === 'Accessibility') {
-                card.innerHTML = createAccessibilityCard(icon, title, data, confidenceClass);
+                bodyHTML = createAccessibilityCard(icon, title, data, confidenceClass);
             } else if (title === 'Site Architecture') {
-                card.innerHTML = createSiteArchitectureCard(icon, title, data, confidenceClass);
+                bodyHTML = createSiteArchitectureCard(icon, title, data, confidenceClass);
             } else if (title === 'Token Taxonomy') {
-                card.innerHTML = createTokenTaxonomyCard(icon, title, data, confidenceClass);
+                bodyHTML = createTokenTaxonomyCard(icon, title, data, confidenceClass);
             } else if (title === 'Interaction States') {
-                card.innerHTML = createInteractionStatesCard(icon, title, data, confidenceClass);
+                bodyHTML = createInteractionStatesCard(icon, title, data, confidenceClass);
             } else if (title === 'Motion Tokens') {
-                card.innerHTML = createMotionTokensCard(icon, title, data, confidenceClass);
+                bodyHTML = createMotionTokensCard(icon, title, data, confidenceClass);
             } else if (title === 'Spatial Composition') {
-                card.innerHTML = createSpatialCompositionCard(icon, title, data, confidenceClass);
+                bodyHTML = createSpatialCompositionCard(icon, title, data, confidenceClass);
             } else if (title === 'Semantic Structure') {
-                card.innerHTML = createSemanticStructureCard(icon, title, data, confidenceClass);
+                bodyHTML = createSemanticStructureCard(icon, title, data, confidenceClass);
             } else if (title === 'Brand Personality') {
-                card.innerHTML = createBrandPersonalityCard(icon, title, data, confidenceClass);
+                bodyHTML = createBrandPersonalityCard(icon, title, data, confidenceClass);
             } else if (title === 'Runtime Animations') {
-                card.innerHTML = createCdpAnimationsCard(icon, title, data, confidenceClass);
+                bodyHTML = createCdpAnimationsCard(icon, title, data, confidenceClass);
             } else if (title === 'Contrast Audit') {
-                card.innerHTML = createContrastAuditCard(icon, title, data, confidenceClass);
+                bodyHTML = createContrastAuditCard(icon, title, data, confidenceClass);
             } else {
-                // Default card - determine metric key from title
-                const metricKeyMap = {
-                    'Accessibility Score': 'accessibility_score',
-                    'SEO Score': 'seo_score',
-                    'Security Score': 'security_score',
-                    'CSS Tricks': 'css_tricks'
-                };
-                const metricKey = metricKeyMap[title];
+                bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
+            }
 
-                card.innerHTML = `
-                    <div class="metric-header">
-                        <div class="metric-title">
-                            <span class="metric-icon">${icon}</span>
-                            ${title}
-                            ${metricKey ? createInfoIcon(metricKey, data.confidence || 0) : ''}
-                        </div>
-                        ${data.confidence ? `<div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>` : ''}
+            // ── Set full card builder output, then rearrange into compact layout ──
+            card.innerHTML = bodyHTML;
+
+            // Extract existing header (most card builders include one)
+            let existingHeader = card.querySelector('.metric-header');
+
+            // If the card builder didn't include a header, create one
+            if (!existingHeader) {
+                existingHeader = document.createElement('div');
+                existingHeader.className = 'metric-header';
+                existingHeader.innerHTML = `
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
                     </div>
-                    <div class="metric-value">${safeDisplayValue(data.pattern)}</div>
-                    ${title === 'Security' && data.confidence ? `
-                        <div style="background: #0a0a0a; padding: 1rem; border-radius: 6px; margin-top: 1rem;">
-                            <div style="font-weight: 600; margin-bottom: 0.75rem; color: #fff;">Security Breakdown:</div>
-                            <div style="color: #888; font-size: 0.85rem; line-height: 1.6;">
-                                Score of ${data.confidence}/100 indicates ${data.confidence >= 80 ? 'excellent' : data.confidence >= 60 ? 'good' : 'needs improvement'} security posture.
-                                <div style="margin-top: 0.5rem;">
-                                    ${data.confidence < 80 ? '⚠️ Missing security headers may include: Content-Security-Policy (CSP), HTTP Strict Transport Security (HSTS), X-Frame-Options, X-Content-Type-Options' : '✅ Security headers properly configured'}
-                                </div>
-                            </div>
-                        </div>
-                    ` : ''}
-                    ${data.details && data.details.proof ? `<div class="metric-detail">${data.details.proof || ''}</div>` : ''}
-                    ${data.code_snippets ? `
-                        <div class="code-block" style="position: relative;">
-                            <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(data.code_snippets)}\`)">Copy</button>${data.code_snippets}</div>
-                    ` : ''}
-                    ${title === 'CSS Tricks' && data.details && data.details.custom_properties && data.details.custom_properties.length > 10 ? `
-                        <button class="view-all-btn" onclick="openCSSVariablesModal(${JSON.stringify(data.details.custom_properties)})">
-                            View All ${data.details.custom_properties.length} Variables →
-                        </button>
-                    ` : ''}
+                    ${data.confidence ? `<div class="confidence-badge confidence-${confidenceClass}">${confNum}%</div>` : ''}
                 `;
             }
 
+            // Collect everything after the header as body content
+            const bodyChildren = [];
+            const headerInDOM = card.contains(existingHeader);
+            let foundHeader = !headerInDOM; // if header was created (not in DOM), collect all nodes
+            [...card.childNodes].forEach(node => {
+                if (node === existingHeader) { foundHeader = true; return; }
+                if (foundHeader) bodyChildren.push(node);
+            });
+
+            // Build summary
+            const summary = generateCardSummary(title, data);
+            const summaryDiv = document.createElement('div');
+            summaryDiv.className = 'metric-summary';
+            summaryDiv.innerHTML = summary;
+
+            // Build body wrapper
+            const bodyDiv = document.createElement('div');
+            bodyDiv.className = 'metric-body';
+            bodyChildren.forEach(n => bodyDiv.appendChild(n));
+
+            // Build toggle
+            const autoExpandCards = ['Typography', 'Color Palette', 'Layout System', 'Spatial Composition'];
+            const shouldExpand = autoExpandCards.includes(title);
+            if (shouldExpand) card.classList.add('expanded');
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'expand-toggle';
+            toggleBtn.innerHTML = `<span class="chevron">&#9660;</span> <span class="toggle-label">${shouldExpand ? 'Less' : 'Details'}</span>`;
+            toggleBtn.addEventListener('click', function() {
+                const mc = this.closest('.metric-card');
+                mc.classList.toggle('expanded');
+                this.querySelector('.toggle-label').textContent = mc.classList.contains('expanded') ? 'Less' : 'Details';
+            });
+
+            // Reassemble card
+            card.innerHTML = '';
+            if (existingHeader) card.appendChild(existingHeader);
+            card.appendChild(summaryDiv);
+            card.appendChild(bodyDiv);
+            card.appendChild(toggleBtn);
+
             return card;
+        }
+
+        // ── Summary Line Generator ──
+        function generateCardSummary(title, data) {
+            switch (title) {
+                case 'Typography': {
+                    const families = data.details?.all_fonts?.length || data.font_families?.length || 0;
+                    const sizes = data.details?.all_sizes?.length || data.sizes_found?.length || 0;
+                    const ts = data.type_scale;
+                    const ratio = ts?.ratio || (typeof ts === 'number' ? ts : null);
+                    const ratioName = ratio ? getScaleName(ratio) : '';
+                    let line = `${families} font ${families === 1 ? 'family' : 'families'}, ${sizes} sizes`;
+                    if (ratio) line += `, ratio ${ratio.toFixed(2)}${ratioName ? ' (' + ratioName + ')' : ''}`;
+                    return line;
+                }
+                case 'Color Palette': {
+                    const primary = data.palette?.primary || [];
+                    const secondary = data.palette?.secondary || [];
+                    const total = primary.length + secondary.length;
+                    const roles = data.color_roles ? Object.keys(data.color_roles).length : 0;
+                    const allColors = [...primary, ...secondary].filter(c => c && typeof c === 'string' && (c.startsWith('#') || c.startsWith('rgb') || c.startsWith('hsl')));
+                    const swatches = allColors.slice(0, 6).map(c =>
+                        `<div style="width:18px;height:18px;border-radius:4px;background:${c};border:1px solid rgba(255,255,255,0.12);flex-shrink:0;" title="${c}"></div>`
+                    ).join('');
+                    return `${total} colors${roles ? ', ' + roles + ' semantic roles' : ''}${swatches ? '<div class="summary-visual">' + swatches + '</div>' : ''}`;
+                }
+                case 'Shadow System': {
+                    const levels = data.levels || data.details?.levels || [];
+                    const count = levels.length || 0;
+                    if (count === 0) return safeDisplayValue(data.pattern);
+                    const blurs = levels.map(l => l.blur_radius ?? l.blur ?? 0);
+                    const minBlur = Math.min(...blurs);
+                    const maxBlur = Math.max(...blurs);
+                    const strip = levels.slice(0, 5).map(l => {
+                        const shadow = l.css || l.raw || `0 2px ${l.blur_radius||l.blur||4}px 0 rgba(0,0,0,0.2)`;
+                        return `<div style="width:36px;height:24px;background:var(--surface-3);border-radius:4px;box-shadow:${shadow};" title="${l.name||''} — blur ${l.blur_radius??l.blur??0}px"></div>`;
+                    }).join('');
+                    return `${count} shadow ${count === 1 ? 'level' : 'levels'} (${minBlur}px to ${maxBlur}px blur)${strip ? '<div class="summary-visual">' + strip + '</div>' : ''}`;
+                }
+                case 'Motion Tokens': {
+                    const speeds = data.details?.duration_scale?.length || 0;
+                    const easings = data.details?.easing_palette?.length || 0;
+                    const personality = data.details?.motion_personality || '';
+                    let line = '';
+                    if (speeds) line += `${speeds} speeds`;
+                    if (easings) line += `${line ? ', ' : ''}${easings} easing curves`;
+                    if (personality) line += `. Style: ${personality}`;
+                    return line || safeDisplayValue(data.pattern);
+                }
+                case 'Responsive Breakpoints': {
+                    const bpObj = data.breakpoints || {};
+                    const bpArr = Array.isArray(bpObj) ? bpObj : Object.keys(bpObj);
+                    const mqCount = data.total_media_queries || data.media_queries?.length || 0;
+                    const uniqueCount = Array.isArray(data.unique_breakpoints) ? data.unique_breakpoints.length : (data.unique_breakpoints || 0);
+                    const count = uniqueCount || bpArr.length || mqCount;
+                    if (count === 0) return 'No breakpoints detected';
+                    return `Adapts to ${count} screen ${count === 1 ? 'size' : 'sizes'}`;
+                }
+                case 'Z-Index Stack': {
+                    // layers can be an object (key→{z_index, count, elements}) or array
+                    const layersRaw = data.layers || data.details?.layers || {};
+                    const layerEntries = Array.isArray(layersRaw) ? layersRaw : Object.values(layersRaw);
+                    const count = layerEntries.length;
+                    const maxZ = Math.max(...layerEntries.map(l => l.z_index ?? l.z ?? l.value ?? 0), 0);
+                    const health = count <= 5 && maxZ <= 1000 ? 'clean architecture' : count <= 10 ? 'moderate complexity' : 'complex layering';
+                    return `${count} layers, ${health}`;
+                }
+                case 'Spacing Scale': {
+                    const scale = data.scale || data.values || [];
+                    const base = data.base_unit;
+                    const count = scale.length;
+                    const baseStr = base ? (typeof base === 'number' ? base + 'px' : base) : '';
+                    return `${count}-step scale${baseStr ? ' based on ' + baseStr + ' grid' : ''}`;
+                }
+                case 'Layout System':
+                    return safeDisplayValue(data.pattern);
+                case 'Spatial Composition': {
+                    const pattern = data.details?.page_structure?.pattern_type || '';
+                    const zones = data.details?.component_zones?.length || 0;
+                    let line = pattern || safeDisplayValue(data.pattern);
+                    if (zones) line += `, ${zones} content zones`;
+                    return line;
+                }
+                case 'Border Radius': {
+                    const values = data.scale || data.values || data.details?.values || [];
+                    const count = values.length || data.unique_values || 0;
+                    return `${count} radius values detected`;
+                }
+                case 'DOM Depth':
+                    return safeDisplayValue(data.pattern);
+                case 'Interactive Elements':
+                    return safeDisplayValue(data.pattern);
+                case 'Animations':
+                    return safeDisplayValue(data.pattern);
+                case 'Performance':
+                    return safeDisplayValue(data.pattern);
+                case 'SEO':
+                    return safeDisplayValue(data.pattern);
+                case 'Security':
+                    return `Score: ${data.confidence || 0}/100 — ${(data.confidence||0) >= 80 ? 'strong posture' : (data.confidence||0) >= 60 ? 'moderate posture' : 'needs attention'}`;
+                case 'Third-Party':
+                    return safeDisplayValue(data.pattern);
+                case 'Accessibility':
+                    return safeDisplayValue(data.pattern);
+                case 'Site Architecture':
+                    return safeDisplayValue(data.pattern);
+                case 'Interaction States':
+                    return safeDisplayValue(data.pattern);
+                case 'Semantic Structure':
+                    return safeDisplayValue(data.pattern);
+                case 'Brand Personality':
+                    return safeDisplayValue(data.pattern);
+                case 'Runtime Animations':
+                    return safeDisplayValue(data.pattern);
+                case 'Contrast Audit': {
+                    const score = data.score ?? data.details?.score ?? '';
+                    const violations = data.details?.total_violations ?? '';
+                    if (score !== '') return `Score ${score}/100${violations ? ', ' + violations + ' violations' : ''}`;
+                    return safeDisplayValue(data.pattern);
+                }
+                case 'Token Taxonomy':
+                    return safeDisplayValue(data.pattern);
+                default:
+                    return safeDisplayValue(data.pattern);
+            }
+        }
+
+        function getScaleName(ratio) {
+            const scales = {
+                1.067: 'Minor Second', 1.125: 'Major Second', 1.2: 'Minor Third',
+                1.25: 'Major Third', 1.333: 'Perfect Fourth', 1.414: 'Augmented Fourth',
+                1.5: 'Perfect Fifth', 1.618: 'Golden Ratio'
+            };
+            // Find closest named scale
+            let closest = '', minDiff = Infinity;
+            for (const [val, name] of Object.entries(scales)) {
+                const diff = Math.abs(parseFloat(val) - ratio);
+                if (diff < minDiff && diff < 0.04) { minDiff = diff; closest = name; }
+            }
+            return closest;
+        }
+
+        // ── Color Palette card body (extracted from inline) ──
+        function createColorPaletteCardBody(icon, title, data, confidenceClass) {
+            const primaryColors = data.palette?.primary || [];
+            const secondaryColors = data.palette?.secondary || [];
+            const allColors = [...primaryColors, ...secondaryColors];
+            const cleanColors = allColors.filter(c => c && typeof c === 'string' && (c.startsWith('#') || c.startsWith('rgb') || c.startsWith('hsl')) && !c.includes(' rgb'));
+
+            const colorSwatchesHTML = cleanColors.slice(0, 8).map(color => `
+                <div style="display: inline-flex; flex-direction: column; align-items: center; margin: 0.5rem;">
+                    <div style="width: 48px; height: 48px; background: ${color}; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 0.5rem;" title="${color}"></div>
+                    <span style="font-size: 0.75rem; color: #888; font-family: var(--font-mono); max-width: 80px; overflow: hidden; text-overflow: ellipsis;">${color.length > 15 ? color.substring(0, 12) + '...' : color}</span>
+                </div>
+            `).join('');
+
+            return `
+                <div class="metric-value">${data.pattern}</div>
+                ${colorSwatchesHTML ? `<div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem;">${colorSwatchesHTML}</div>` : ''}
+                ${cleanColors.length > 8 ? `<div style="margin-top: 1rem; padding: 0.75rem; background: rgba(10,132,255,0.1); border-radius: 6px; color: #0a84ff; font-size: 0.85rem;">+${cleanColors.length - 8} more colors detected</div>` : ''}
+                ${data.color_roles && Object.keys(data.color_roles).length > 0 ? `
+                    <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.75rem;">
+                        <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Semantic Roles</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            ${Object.entries(data.color_roles).map(([role, hex]) => `
+                                <div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 4px 10px;">
+                                    <div style="width: 16px; height: 16px; border-radius: 4px; background: ${hex}; border: 1px solid rgba(255,255,255,0.15); flex-shrink: 0;"></div>
+                                    <span style="font-size: 0.75rem; color: #aaa;">${role.replace(/_/g, ' ')}</span>
+                                    <span style="font-size: 0.68rem; color: #666; font-family: var(--font-mono);">${hex}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                ${data.preview?.wcag_compliance ? `
+                    <div style="margin-top: 1rem; padding: 0.75rem; background: var(--surface-0); border-radius: 6px;">
+                        <div style="font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">WCAG Compliance</div>
+                        <div style="color: var(--success); font-size: 0.85rem;">
+                            ${data.preview.accessible_pairs?.length || 0} accessible color pairs found
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // ── Default card body (extracted from inline) ──
+        function createDefaultCardBody(icon, title, data, confidenceClass) {
+            const metricKeyMap = {
+                'Accessibility Score': 'accessibility_score',
+                'SEO Score': 'seo_score',
+                'Security Score': 'security_score',
+                'CSS Tricks': 'css_tricks'
+            };
+            const metricKey = metricKeyMap[title];
+
+            return `
+                <div class="metric-value">${safeDisplayValue(data.pattern)}</div>
+                ${title === 'Security' && data.confidence ? `
+                    <div style="background: var(--surface-0); padding: 1rem; border-radius: 6px; margin-top: 1rem;">
+                        <div style="font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">Security Breakdown:</div>
+                        <div style="color: var(--text-tertiary); font-size: 0.85rem; line-height: 1.6;">
+                            Score of ${data.confidence}/100 indicates ${data.confidence >= 80 ? 'excellent' : data.confidence >= 60 ? 'good' : 'needs improvement'} security posture.
+                        </div>
+                    </div>
+                ` : ''}
+                ${data.details && data.details.proof ? `<div class="metric-detail">${data.details.proof || ''}</div>` : ''}
+                ${data.code_snippets ? `
+                    <div class="code-block" style="position: relative;">
+                        <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(data.code_snippets)}\`)">Copy</button>${data.code_snippets}</div>
+                ` : ''}
+                ${title === 'CSS Tricks' && data.details && data.details.custom_properties && data.details.custom_properties.length > 10 ? `
+                    <button class="view-all-btn" onclick="openCSSVariablesModal(${JSON.stringify(data.details.custom_properties)})">
+                        View All ${data.details.custom_properties.length} Variables
+                    </button>
+                ` : ''}
+            `;
         }
 
         function createSpacingScaleCard(icon, title, data, confidenceClass) {
@@ -5501,24 +5731,57 @@
 
         function createBreakpointsCard(icon, title, data, confidenceClass) {
             const breakpoints = data.breakpoints || {};
-            const bpHTML = Object.entries(breakpoints)
-                .map(([name, value]) => `<div class="breakpoint-item"><span class="bp-name">${name}</span><span class="bp-value">${value}</span></div>`)
-                .join('');
-
-            // Show actual media queries behind a toggle
             const mediaQueries = data.media_queries || [];
-            const bpToggleId = 'bp-mq-' + Math.random().toString(36).slice(2, 8);
-            const mediaQueriesHTML = mediaQueries.length > 0 ? `
-                <div style="margin-top: 1rem;">
-                    <button onclick="var el=document.getElementById('${bpToggleId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';this.querySelector('.sa').style.transform=open?'rotate(0deg)':'rotate(180deg)';" style="width:100%; background:rgba(10,10,10,0.4); border:none; border-radius:8px; padding:0.7rem 1rem; cursor:pointer; display:flex; align-items:center; justify-content:space-between; color:#fff; font-size:0.82rem; font-weight:600;">
-                        <span>Media Queries <span style="color:#666; font-weight:400;">${mediaQueries.length} rules</span></span>
-                        <span class="sa" style="display:inline-block; transform:rotate(0deg); transition:transform 0.2s; color:#666;">▼</span>
-                    </button>
-                    <div id="${bpToggleId}" style="display:none; padding:0.75rem; background:rgba(10,10,10,0.25); border-radius:0 0 8px 8px; font-family:'SF Mono',monospace; font-size:0.78rem;">
-                        ${mediaQueries.map(mq => `
-                            <div style="padding:0.4rem 0.5rem; margin:0.2rem 0; background:rgba(255,255,255,0.04); border-left:2px solid #0a84ff; border-radius:0 4px 4px 0; color:#ccc; word-break:break-all;">${mq}</div>
-                        `).join('')}
-                    </div>
+            const uniqueBPs = Array.isArray(data.unique_breakpoints) ? data.unique_breakpoints : [];
+
+            // Parse breakpoint pixel values from unique_breakpoints or breakpoints object
+            let bpValues = uniqueBPs.map(v => typeof v === 'number' ? v : parseInt(v)).filter(v => v > 0 && v < 3000);
+            if (bpValues.length === 0) {
+                // Try parsing from breakpoints object values
+                bpValues = Object.values(breakpoints).map(v => parseInt(String(v))).filter(v => v > 0 && v < 3000);
+            }
+            bpValues.sort((a, b) => a - b);
+
+            // Device labels for common ranges
+            function deviceLabel(px) {
+                if (px <= 480) return 'Phone';
+                if (px <= 768) return 'Tablet';
+                if (px <= 1024) return 'Laptop';
+                if (px <= 1440) return 'Desktop';
+                return 'Wide';
+            }
+
+            // Build visual ruler
+            const maxPx = Math.max(...bpValues, 1536);
+            const rulerHTML = bpValues.length > 0 ? `
+                <div style="position:relative; height:56px; margin:var(--space-4) 0 var(--space-2);">
+                    <!-- Ruler bar -->
+                    <div style="position:absolute; top:18px; left:0; right:0; height:4px; background:var(--surface-3); border-radius:2px;"></div>
+                    ${bpValues.map(px => {
+                        const pct = Math.min((px / maxPx) * 100, 98);
+                        return `
+                            <div style="position:absolute; left:${pct}%; transform:translateX(-50%); text-align:center; top:0;">
+                                <div style="font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap;">${deviceLabel(px)}</div>
+                                <div style="width:2px; height:12px; background:var(--accent); margin:2px auto;"></div>
+                                <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-secondary); white-space:nowrap;">${px}px</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : '<div style="color:var(--text-disabled); font-size:var(--text-sm); padding:var(--space-3) 0;">No breakpoint values detected</div>';
+
+            // Plain English explanation
+            const explainHTML = bpValues.length > 0
+                ? `<div style="font-size:var(--text-xs); color:var(--text-tertiary); margin-bottom:var(--space-3);">The layout changes at these widths to fit different devices.</div>`
+                : '';
+
+            // Media query details (collapsible in body)
+            const mqHTML = mediaQueries.length > 0 ? `
+                <div style="margin-top:var(--space-3);">
+                    <div style="font-size:0.72rem; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:var(--space-2);">Media Queries (${mediaQueries.length})</div>
+                    ${mediaQueries.map(mq => `
+                        <div style="padding:0.35rem 0.5rem; margin:0.2rem 0; background:var(--surface-0); border-left:2px solid var(--accent); border-radius:0 var(--radius-sm) var(--radius-sm) 0; color:var(--text-secondary); font-family:var(--font-mono); font-size:0.75rem; word-break:break-all;">${mq}</div>
+                    `).join('')}
                 </div>
             ` : '';
 
@@ -5531,19 +5794,10 @@
                     </div>
                     <div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>
                 </div>
-                <div class="metric-value">${data.pattern}</div>
-                <div class="metric-detail" style="color: #888; font-size: 0.85rem; margin-bottom: 0.5rem;">
-                    Screen widths where layout changes for mobile/tablet/desktop
-                </div>
-                <div style="font-size: 0.75rem; color: #888; padding: 0.75rem; background: rgba(10,132,255,0.08); border-radius: 6px; margin-bottom: 1rem;">
-                    💡 <strong>Common breakpoints:</strong> 640px = large phones, 768px = tablets, 1024px = small laptops, 1280px = desktops, 1536px = large screens
-                </div>
-                <div class="breakpoints-list">${bpHTML}</div>
-                ${mediaQueriesHTML}
-                <div class="metric-stats">
-                    ${data.current_size ? `<span>📏 Current: ${data.current_size.width}px × ${data.current_size.height}px</span>` : `<span>📏 ${Object.keys(breakpoints).length} breakpoints detected</span>`}
-                    ${data.total_media_queries ? `<span>📊 ${data.total_media_queries} media queries</span>` : mediaQueries.length ? `<span>📊 ${mediaQueries.length} media queries</span>` : ''}
-                </div>
+                ${explainHTML}
+                ${rulerHTML}
+                ${data.current_size ? `<div style="font-size:var(--text-xs); color:var(--text-disabled);">Current viewport: ${data.current_size.width} × ${data.current_size.height}px</div>` : ''}
+                ${mqHTML}
             `;
         }
 
@@ -5868,56 +6122,19 @@
                 return { x: m[1], y: m[2], blur: m[3], spread: m[4] || '0', color: m[5].trim(), inset };
             }
 
-            // --- Interactive Preview Surface ---
-            const previewHTML = levels.length > 0 ? `
-                <div style="margin: 1rem 0; padding: 1.25rem; background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 40%), rgba(10,10,10,0.4); border-radius: 12px;">
-                    <div style="font-weight: 600; color: #fff; font-size: 0.82rem; margin-bottom: 0.25rem;">Shadow Preview</div>
-                    <div style="font-size: 0.68rem; color: #666; margin-bottom: 1rem;">Hover any shadow below to preview it live</div>
-                    <div style="display: flex; justify-content: center; padding: 2rem 0;">
-                        <div id="${previewId}" style="width: 160px; height: 100px; background: #f4f4f4; border-radius: 10px; transition: box-shadow 0.3s ease; display: flex; align-items: center; justify-content: center;">
-                            <span id="${previewId}-label" style="font-size: 0.75rem; color: #999; font-weight: 500;">hover to preview</span>
-                        </div>
-                    </div>
-                </div>
-            ` : '';
-
-            // --- Side-by-side comparison strip (all shadows lightest → heaviest) ---
+            // --- Clean comparison strip (same-height cards, lightest → heaviest) ---
             let comparisonHTML = '';
             if (levels.length > 0) {
                 const sorted = [...levels].sort((a, b) => (a.blur_radius || 0) - (b.blur_radius || 0));
                 comparisonHTML = `
-                <div style="margin: 1rem 0; padding: 1.25rem 1rem; background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 40%), rgba(10,10,10,0.4); border-radius: 12px;">
-                    <div style="font-weight: 600; color: #fff; font-size: 0.82rem; margin-bottom: 0.25rem;">Elevation Comparison</div>
-                    <div style="font-size: 0.68rem; color: #666; margin-bottom: 1rem;">All shadow levels, lightest to heaviest. Hover to preview.</div>
-                    <div style="display: flex; align-items: flex-end; justify-content: center; gap: 1.25rem; flex-wrap: wrap; min-height: 80px; position: relative; padding-bottom: 0.5rem;">
-                        <!-- ground line -->
-                        <div style="position: absolute; bottom: 0; left: 3%; right: 3%; height: 1px; background: rgba(255,255,255,0.06);"></div>
-                        ${sorted.map((lvl, i) => {
-                            const anatomy = parseShadow(lvl.css);
-                            const lift = Math.min(i * 8, 40);
-                            const hue = Math.round(210 + i * (140 / Math.max(sorted.length - 1, 1)));
-                            return `
-                            <div style="display: flex; flex-direction: column; align-items: center; margin-bottom: ${lift}px; cursor: pointer;"
-                                 onmouseenter="var p=document.getElementById('${previewId}');if(p){p.style.boxShadow='${lvl.css.replace(/'/g,"\\'")}';document.getElementById('${previewId}-label').textContent='${lvl.name}';}"
-                                 onmouseleave="var p=document.getElementById('${previewId}');if(p){p.style.boxShadow='none';document.getElementById('${previewId}-label').textContent='hover to preview';}">
-                                <!-- card with live shadow -->
-                                <div style="width: 72px; height: 48px; background: #f4f4f4; border-radius: 6px; box-shadow: ${lvl.css}; display: flex; align-items: center; justify-content: center; transition: transform 0.15s;">
-                                    <span style="font-size: 0.6rem; color: #999; font-weight: 600;">${lvl.name.length > 10 ? lvl.name.substring(0, 8) + '..' : lvl.name}</span>
-                                </div>
-                                <!-- anatomy labels -->
-                                <div style="margin-top: 6px; text-align: center;">
-                                    <div style="font-size: 0.65rem; color: hsl(${hue}, 70%, 65%); font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;">${lvl.name}</div>
-                                    ${anatomy ? `
-                                        <div style="font-size: 0.6rem; color: #777; margin-top: 2px; font-family: 'SF Mono', monospace;">
-                                            <span title="X offset">${anatomy.x}</span> <span title="Y offset">${anatomy.y}</span> <span title="Blur">${anatomy.blur}</span>${anatomy.spread !== '0' ? ' <span title="Spread">'+anatomy.spread+'</span>' : ''}
-                                        </div>
-                                        <div style="font-size: 0.58rem; color: #555; margin-top: 1px;">${anatomy.color.length > 20 ? anatomy.color.substring(0, 18) + '..' : anatomy.color}</div>
-                                    ` : ''}
-                                    <div style="font-size: 0.58rem; color: #555; margin-top: 1px;">${lvl.count} use${lvl.count !== 1 ? 's' : ''}</div>
-                                </div>
-                            </div>`;
-                        }).join('')}
-                    </div>
+                <div style="display:flex; align-items:flex-start; gap:var(--space-3); flex-wrap:wrap; margin:var(--space-4) 0; padding:var(--space-4); background:var(--surface-0); border-radius:var(--radius-md);">
+                    ${sorted.map(lvl => `
+                        <div style="display:flex; flex-direction:column; align-items:center; flex:1; min-width:60px; max-width:100px;">
+                            <div style="width:60px; height:80px; background:#f4f4f4; border-radius:var(--radius-sm); box-shadow:${lvl.css}; margin-bottom:var(--space-2);"></div>
+                            <div style="font-size:0.65rem; color:var(--text-secondary); font-weight:600; text-align:center;">${lvl.name}</div>
+                            <div style="font-size:0.6rem; color:var(--text-disabled); font-family:var(--font-mono);">${lvl.count}x</div>
+                        </div>
+                    `).join('')}
                 </div>`;
             }
 
@@ -5977,15 +6194,9 @@
                     </div>
                     <div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>
                 </div>
-                <div class="metric-value">${data.pattern}</div>
-                ${previewHTML}
                 ${comparisonHTML}
                 ${detailHTML}
                 ${trailHTML}
-                <div class="metric-stats">
-                    <span>📊 ${data.total_instances} instances</span>
-                    <span>🎯 ${data.unique_shadows} unique shadows</span>
-                </div>
             `;
         }
 
@@ -6210,6 +6421,18 @@
                 </div>
             ` : '';
 
+            // Health badge
+            const health = data.health || {};
+            const healthLevel = health.level || 'Unknown';
+            const healthColors = { 'Clean': 'var(--success)', 'Complex': 'var(--warning)', 'Chaotic': 'var(--danger)', 'Unknown': 'var(--text-disabled)' };
+            const healthBgs = { 'Clean': 'var(--success-muted)', 'Complex': 'var(--warning-muted)', 'Chaotic': 'var(--danger-muted)', 'Unknown': 'var(--surface-3)' };
+            const healthBadgeHTML = `
+                <div style="display:inline-flex; align-items:center; gap:var(--space-2); padding:var(--space-1) var(--space-3); background:${healthBgs[healthLevel] || healthBgs['Unknown']}; color:${healthColors[healthLevel] || healthColors['Unknown']}; border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:600; margin-bottom:var(--space-3);">
+                    ${healthLevel === 'Clean' ? '&#10003;' : healthLevel === 'Complex' ? '&#9888;' : healthLevel === 'Chaotic' ? '&#10007;' : '?'} ${healthLevel}
+                    ${health.detail ? `<span style="color:var(--text-tertiary); font-weight:400;"> &mdash; ${health.detail}</span>` : ''}
+                </div>
+            `;
+
             return `
                 <div class="metric-header">
                     <div class="metric-title">
@@ -6219,13 +6442,10 @@
                     </div>
                     <div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>
                 </div>
-                <div class="metric-value">${data.pattern}</div>
-                <div style="font-size: 0.78rem; color: #888; padding: 0.6rem 0.75rem; background: rgba(10,132,255,0.08); border-radius: 6px; margin: 0.5rem 0; line-height: 1.5;">
-                    Z-index controls which elements appear in front of others (like layers in Photoshop). Each layer is identified by its semantic role — what it <em>is</em>, not just its CSS class. Interactive elements (buttons, links) are highlighted.
-                </div>
+                ${healthBadgeHTML}
                 ${statsHTML}
                 ${visualStackHTML}
-                ${conflictsHTML ? `<div style="padding: 0.5rem 0.75rem; background: rgba(10,10,10,0.3); border-radius: 8px; margin: 0.5rem 0;">${conflictsHTML}</div>` : ''}
+                ${conflictsHTML ? `<div style="padding: 0.5rem 0.75rem; background: var(--surface-0); border-radius: var(--radius-md); margin: 0.5rem 0;">${conflictsHTML}</div>` : ''}
                 ${layersToggleHTML}
                 ${ghostToggleHTML}
             `;
@@ -7828,6 +8048,26 @@
                 </div>
             `;
 
+            // ── Side-by-side easing comparison (top 3 curves) ──
+            const topCurves = curves.slice(0, 3);
+            const comparisonHTML = topCurves.length > 0 ? `
+                <div style="display:flex; gap:var(--space-3); margin:var(--space-3) 0; padding:var(--space-3); background:var(--surface-0); border-radius:var(--radius-md);">
+                    ${topCurves.map(c => {
+                        const cssVal = (c.value || '').trim();
+                        const label = c.known_as || c.role || cssVal.substring(0, 20);
+                        return `
+                        <div style="flex:1; text-align:center;">
+                            <div style="height:40px; display:flex; align-items:center; justify-content:flex-start; overflow:hidden; margin-bottom:var(--space-1);">
+                                <div style="width:40px; height:40px; background:var(--accent); border-radius:var(--radius-sm); animation:motionDemo 2s ${cssVal} infinite alternate; flex-shrink:0;"></div>
+                            </div>
+                            <div style="font-family:var(--font-mono); font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${label}</div>
+                            <div style="font-size:0.6rem; color:var(--text-disabled);">${c.count||0}x</div>
+                        </div>`;
+                    }).join('')}
+                </div>
+                <style>@keyframes motionDemo { from { transform: translateX(0); } to { transform: translateX(calc(100% - 40px)); } }</style>
+            ` : '';
+
             return `
                 <div class="metric-header">
                     <div class="metric-title">
@@ -7837,14 +8077,13 @@
                     </div>
                     <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
-                <div class="metric-body">
-                    ${personality ? `<div style="font-size: 0.82rem; color: #ccc; font-style: italic; padding: 0.5rem 0.75rem; background: rgba(201,184,255,0.08); border-left: 3px solid #c9b8ff; border-radius: 6px; margin-bottom: 0.75rem; line-height: 1.5;">${personality}</div>` : ''}
-                    ${summaryHTML}
-                    ${libsHTML}
-                    ${durationBarsHTML}
-                    ${easingHTML}
-                    ${choreoHTML}
-                </div>
+                ${personality ? `<div style="font-size: 0.82rem; color: var(--text-secondary); font-style: italic; padding: 0.5rem 0.75rem; background: rgba(201,184,255,0.08); border-left: 3px solid #c9b8ff; border-radius: 6px; margin-bottom: 0.75rem; line-height: 1.5;">${personality}</div>` : ''}
+                ${comparisonHTML}
+                ${summaryHTML}
+                ${libsHTML}
+                ${durationBarsHTML}
+                ${easingHTML}
+                ${choreoHTML}
             `;
         }
 
@@ -9673,7 +9912,7 @@
             if (!slider) return;
 
             // Restore saved threshold
-            const saved = parseInt(localStorage.getItem(CONF_STORAGE_KEY) || '0', 10);
+            const saved = parseInt(localStorage.getItem(CONF_STORAGE_KEY) || '40', 10);
             slider.value = saved;
             valueEl.textContent = saved + '%';
 
@@ -9688,8 +9927,7 @@
         function showConfidenceFilter() {
             const bar = document.getElementById('confidenceFilterBar');
             if (bar) bar.classList.add('visible');
-            // Apply stored threshold after results render
-            const saved = parseInt(localStorage.getItem(CONF_STORAGE_KEY) || '0', 10);
+            const saved = parseInt(localStorage.getItem(CONF_STORAGE_KEY) || '40', 10);
             if (saved > 0) applyConfidenceFilter(saved);
         }
 
@@ -9705,22 +9943,66 @@
                     card.classList.remove('conf-suppressed');
                 }
             });
+
+            // Update count and show toggle button
             const countEl = document.getElementById('confHiddenCount');
             if (countEl) {
-                countEl.textContent = hidden > 0
-                    ? `${hidden} metric${hidden !== 1 ? 's' : ''} below threshold (dimmed)`
-                    : '';
+                if (hidden > 0) {
+                    const grid = document.getElementById('metricsGrid');
+                    const isShowingAll = grid && grid.classList.contains('show-all-metrics');
+                    countEl.innerHTML = `<button onclick="toggleHiddenMetrics()" style="background:none; border:1px solid var(--border-default); border-radius:var(--radius-sm); padding:var(--space-1) var(--space-3); color:var(--text-tertiary); cursor:pointer; font-family:var(--font-body); font-size:var(--text-xs);">${hidden} hidden \u2014 ${isShowingAll ? 'Hide' : 'Show all'}</button>`;
+                } else {
+                    countEl.innerHTML = '';
+                }
             }
+
+            // Auto-hide empty category sections
+            document.querySelectorAll('#metricsGrid .category-section').forEach(section => {
+                const sectionCards = section.querySelectorAll('.metric-card');
+                const allHidden = sectionCards.length > 0 && Array.from(sectionCards).every(c => c.classList.contains('conf-suppressed'));
+                const grid = document.getElementById('metricsGrid');
+                const showAll = grid && grid.classList.contains('show-all-metrics');
+                section.style.display = (allHidden && !showAll) ? 'none' : '';
+            });
+        }
+
+        function toggleHiddenMetrics() {
+            const grid = document.getElementById('metricsGrid');
+            if (!grid) return;
+            grid.classList.toggle('show-all-metrics');
+            // Re-apply to update button text and category visibility
+            const slider = document.getElementById('confThresholdSlider');
+            if (slider) applyConfidenceFilter(parseInt(slider.value, 10));
+        }
+
+        function toggleExpandAll() {
+            const cards = document.querySelectorAll('#metricsGrid .metric-card');
+            const btn = document.getElementById('expandCollapseBtn');
+            // If most cards are collapsed, expand all; otherwise collapse all
+            const expandedCount = document.querySelectorAll('#metricsGrid .metric-card.expanded').length;
+            const shouldExpand = expandedCount < cards.length / 2;
+            cards.forEach(card => {
+                if (shouldExpand) {
+                    card.classList.add('expanded');
+                } else {
+                    card.classList.remove('expanded');
+                }
+                const label = card.querySelector('.toggle-label');
+                if (label) label.textContent = shouldExpand ? 'Less' : 'Details';
+            });
+            if (btn) btn.textContent = shouldExpand ? 'Collapse All' : 'Expand All';
         }
 
         function resetConfidenceFilter() {
             const slider = document.getElementById('confThresholdSlider');
             const valueEl = document.getElementById('confThresholdValue');
             if (!slider) return;
-            slider.value = 0;
-            valueEl.textContent = '0%';
+            slider.value = 40;
+            valueEl.textContent = '40%';
             localStorage.removeItem(CONF_STORAGE_KEY);
-            applyConfidenceFilter(0);
+            applyConfidenceFilter(40);
+            const grid = document.getElementById('metricsGrid');
+            if (grid) grid.classList.remove('show-all-metrics');
         }
 
         initConfidenceFilter();

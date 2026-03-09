@@ -81,24 +81,29 @@ class VisualHierarchyAnalyzer:
                 // Visual weight: size and font are primary signals.
                 // z-index is a tiebreaker, not a multiplier — capped and scaled
                 // by area so tiny overlays (arrows at z999) don't drown real content.
-                const sizeScore = size * 0.0001;                          // area contribution
+                const role = el.getAttribute('role');
+                const ariaLabel = el.getAttribute('aria-label');
+                const tagName = el.tagName.toLowerCase();
+
+                // Nav/header structural elements: cap sizeScore to prevent
+                // full-width elements from dominating the visual weight map.
+                const isNavStructural = tagName === 'nav' || role === 'navigation' || role === 'banner'
+                    || (tagName === 'header' && rect.width > viewport.width * 0.8);
+                const sizeScore = isNavStructural ? Math.min(size * 0.0001, 5.0) : size * 0.0001;
                 const foldBonus = aboveFold ? 50 : 0;                     // above-fold lift
                 const fontScore = fontSize * 3;                           // text size matters
                 const zBonus = zIndex > 0 ? Math.min(zIndex, 50) * (size * 0.0005) : 0;  // z-index scaled by size, capped at 50
 
-                // Semantic importance bonus (navigation, headers should rank high)
-                const role = el.getAttribute('role');
-                const ariaLabel = el.getAttribute('aria-label');
-                const tagName = el.tagName.toLowerCase();
+                // Semantic importance bonus
                 let semanticBonus = 0;
 
-                // Navigation elements (CRITICAL - users look here first, boost heavily)
+                // Navigation elements — structural, not the visual focus
                 if (tagName === 'nav' || role === 'navigation' || role === 'banner') {
-                    semanticBonus = 500;  // Increased from 200 to ensure top placement
+                    semanticBonus = 200;  // Reduced from 500 — nav is structural, not hero
                 }
-                // Header elements (also high priority)
+                // Header elements
                 else if (tagName === 'header' && rect.top < viewport.height * 0.2) {
-                    semanticBonus = 400;  // Increased from 180
+                    semanticBonus = 250;  // Reduced from 400
                 }
                 // Main content area
                 else if (tagName === 'main' || role === 'main') {
@@ -124,6 +129,7 @@ class VisualHierarchyAnalyzer:
                     className: safeClassName,
                     id: el.id,
                     weight: weight,
+                    isNavStructural: isNavStructural,
                     rect: {
                         top: rect.top,
                         left: rect.left,
@@ -141,8 +147,11 @@ class VisualHierarchyAnalyzer:
                 };
             }).filter(el => el !== null);
 
-            // Sort by visual weight
-            const sorted = weightedElements.sort((a, b) => b.weight - a.weight);
+            // Sort by visual weight, excluding nav/header structural elements
+            // from the ranked visual hierarchy (they are shown separately)
+            const sorted = weightedElements
+                .filter(el => !el.isNavStructural)
+                .sort((a, b) => b.weight - a.weight);
 
             // Detect hero section (largest heading + nearby image)
             const heroHeading = sorted.find(el =>

@@ -466,10 +466,16 @@ class DesignSystemMetrics:
                 const zIndex = styles.zIndex;
 
                 if (zIndex && zIndex !== 'auto') {
+                    // SVG elements have className as SVGAnimatedString
+                    const safeClass = (typeof el.className === 'string')
+                        ? el.className : (el.className?.baseVal || '');
                     zIndexes.push({
                         z: parseInt(zIndex),
                         tag: el.tagName.toLowerCase(),
-                        classes: el.className,
+                        classes: safeClass,
+                        id: el.id || '',
+                        role: el.getAttribute('role') || '',
+                        ariaLabel: el.getAttribute('aria-label') || '',
                         position: styles.position
                     });
                 }
@@ -484,10 +490,14 @@ class DesignSystemMetrics:
         # Detect conflicts
         conflicts = self._detect_z_conflicts(result)
 
+        # Health summary
+        health = self._z_index_health(result)
+
         return {
             'confidence': 90 if result else 60,
             'pattern': f'{len(layers)} stacking layers detected',
             'layers': layers,
+            'health': health,
             'total_elements': len(result),
             'conflicts': conflicts,
             'evidence': {
@@ -495,9 +505,28 @@ class DesignSystemMetrics:
             }
         }
 
+    @staticmethod
+    def _smart_label(el: Dict) -> str:
+        """Generate a human-readable label for a z-index element.
+        Priority: aria-label > id > role > first meaningful class > tag"""
+        if el.get('ariaLabel'):
+            label = el['ariaLabel']
+            return label[:40] if len(label) > 40 else label
+        if el.get('id'):
+            return f"#{el['id'][:35]}"
+        if el.get('role'):
+            return f"{el['tag']}[role={el['role']}]"
+        classes = el.get('classes', '')
+        if classes:
+            # Take first meaningful class (skip utility prefixes)
+            first_class = classes.split()[0] if isinstance(classes, str) else ''
+            if first_class:
+                return f"{el['tag']}.{first_class[:30]}"
+        return el.get('tag', 'div')
+
     def _categorize_z_indexes(self, z_data: List[Dict]) -> Dict:
         """
-        Categorize z-indexes into logical layers
+        Categorize z-indexes into logical layers with smart labels
         """
         if not z_data:
             return {}
@@ -525,10 +554,23 @@ class DesignSystemMetrics:
             layers[layer_name] = {
                 'z_index': z,
                 'count': len(elements),
-                'elements': [f"{e['tag']}.{e['classes'][:30]}" for e in elements[:3]]
+                'elements': [self._smart_label(e) for e in elements[:5]]
             }
 
         return layers
+
+    def _z_index_health(self, z_data: List[Dict]) -> Dict:
+        """Compute z-index health summary: Clean / Complex / Chaotic"""
+        if not z_data:
+            return {'level': 'Clean', 'detail': 'No z-index values detected'}
+        unique = len(set(item['z'] for item in z_data))
+        max_z = max(item['z'] for item in z_data)
+        if unique <= 5 and max_z <= 1000:
+            return {'level': 'Clean', 'detail': f'{unique} unique values, max z-index {max_z}'}
+        elif unique <= 10:
+            return {'level': 'Complex', 'detail': f'{unique} unique values, max z-index {max_z}'}
+        else:
+            return {'level': 'Chaotic', 'detail': f'{unique} unique values, max z-index {max_z} — consider consolidating'}
 
     def _detect_z_conflicts(self, z_data: List[Dict]) -> List[str]:
         """
