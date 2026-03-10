@@ -856,16 +856,49 @@
         .detail-label { color: #666; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 0.4rem; margin-bottom: 0.2rem; }
         .detail-check { color: #34c759; } .detail-cross { color: #555; }
 
-        /* ── Easing demo dot (motion_tokens card) ── */
-        @keyframes ease-demo {
+        /* ── Motion track animations (motion_tokens card) ── */
+        @keyframes motion-track-slide {
             from { transform: translateX(0); }
-            to   { transform: translateX(28px); }
+            to   { transform: translateX(calc(100% - 12px)); }
         }
-        .easing-dot {
-            width: 8px; height: 8px;
+        @keyframes race-track-slide {
+            from { transform: translateX(0); }
+            to   { transform: translateX(calc(100% - 32px)); }
+        }
+        .motion-track {
+            position: relative;
+            height: 24px;
+            background: var(--surface-0);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+        }
+        .motion-track-dot {
+            position: absolute;
+            top: 50%; left: 0;
+            width: 10px; height: 10px;
             border-radius: 50%;
             background: #c9b8ff;
-            animation: ease-demo 1.2s var(--easing-fn, ease) infinite alternate;
+            transform: translateY(-50%);
+            animation: motion-track-slide 1.8s var(--easing-fn, ease) infinite alternate;
+        }
+        .race-track {
+            position: relative;
+            height: 36px;
+            background: var(--surface-0);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+            margin-bottom: 4px;
+        }
+        .race-track-element {
+            position: absolute;
+            top: 50%; left: 0;
+            width: 32px; height: 24px;
+            border-radius: var(--radius-sm);
+            background: var(--accent);
+            transform: translateY(-50%);
+            animation: race-track-slide 2s var(--easing-fn, ease) infinite alternate;
         }
 
         .animate-in {
@@ -7965,26 +7998,30 @@
                 return m ? [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3]), parseFloat(m[4])] : null;
             }
 
-            // Render a 36×36 SVG showing the bezier curve with axis hints
-            function bezierSVG(pts) {
-                if (!pts) return '<div style="width:36px;height:36px;flex-shrink:0;"></div>';
-                const [x1, y1, x2, y2] = pts;
-                const W = 36, H = 36;
-                const cx1 = x1 * W, cy1 = H - y1 * H;
-                const cx2 = x2 * W, cy2 = H - y2 * H;
-                return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="flex-shrink:0; opacity:0.85;">
-                    <line x1="0" y1="${H}" x2="${W}" y2="0" stroke="rgba(255,255,255,0.1)" stroke-width="0.5" stroke-dasharray="2"/>
-                    <path d="M 0 ${H} C ${cx1.toFixed(1)} ${cy1.toFixed(1)}, ${cx2.toFixed(1)} ${cy2.toFixed(1)}, ${W} 0"
-                          fill="none" stroke="#c9b8ff" stroke-width="1.5" stroke-linecap="round"/>
-                    <circle cx="0" cy="${H}" r="2" fill="#c9b8ff"/>
-                    <circle cx="${W}" cy="0" r="2" fill="#c9b8ff"/>
-                    <!-- axis hints: T = time (x), P = progression (y) -->
-                    <text x="${W-1}" y="${H}" font-size="5" fill="rgba(255,255,255,0.22)" text-anchor="end" dominant-baseline="auto">T</text>
-                    <text x="1" y="5" font-size="5" fill="rgba(255,255,255,0.22)" text-anchor="start">P</text>
-                </svg>`;
+            // Plain-English easing descriptions (layperson-friendly)
+            function easingDescription(val) {
+                const v = (val || '').trim().toLowerCase();
+                if (v === 'linear')      return { short: 'Constant speed',          detail: 'Moves at the same rate throughout' };
+                if (v === 'ease')        return { short: 'Gentle start and stop',   detail: 'Smooth overall — the browser default' };
+                if (v === 'ease-in')     return { short: 'Starts slow, speeds up',  detail: 'Gradual acceleration' };
+                if (v === 'ease-out')    return { short: 'Starts fast, slows down', detail: 'Decelerates to a stop — natural for entrances' };
+                if (v === 'ease-in-out') return { short: 'Slow start and stop',     detail: 'Accelerates then decelerates symmetrically' };
+                if (v.startsWith('steps')) return { short: 'Jumps in steps',        detail: 'Discrete frames — no smooth interpolation' };
+                const pts = parseBezierPts(v);
+                if (pts) {
+                    const [x1, y1, x2, y2] = pts;
+                    if (y1 > 1 || y1 < -0.1 || y2 > 1.1)  return { short: 'Springy overshoot',    detail: 'Bounces past the target, then settles' };
+                    if (x1 < 0.15 && y2 > 0.9)              return { short: 'Snaps into place',     detail: 'Quick burst then eases to a stop' };
+                    if (x1 > 0.4 && y2 < 0.5)               return { short: 'Slow then sudden',     detail: 'Builds slowly then rushes to finish' };
+                    if (Math.abs(x1 - 0.42) < 0.1 && Math.abs(y2 - 1) < 0.1)
+                                                              return { short: 'Smooth deceleration',  detail: 'Custom ease-out feel' };
+                    if (x1 < 0.3 && y1 > 0.5)               return { short: 'Fast start, gentle end', detail: 'Responsive with a soft landing' };
+                    return { short: 'Custom curve', detail: 'Unique timing — see animation' };
+                }
+                return { short: 'Custom timing', detail: '' };
             }
 
-            // Map a CSS easing value to its Josh-Comeau-style use-case label
+            // Map a CSS easing value to its use-case label
             function easingUseCase(val) {
                 const v = (val || '').trim().toLowerCase();
                 if (v === 'ease-out')    return { label: 'entering',  color: '#34c759' };
@@ -7997,39 +8034,36 @@
                 return null;
             }
 
-            // Render a small looping animation dot using the actual easing
-            function animDot(val) {
-                const cssVal = (val || '').trim();
-                if (!cssVal) return '';
-                return `<div style="width:44px; height:14px; display:flex; align-items:center; flex-shrink:0; overflow:hidden;">
-                    <div class="easing-dot" style="--easing-fn:${cssVal};"></div>
-                </div>`;
-            }
-
             const easingHTML = curves.length > 0 ? `
                 <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.75rem;">
                     <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">Easing Palette</div>
                     ${curves.slice(0, 8).map(c => {
                         const roleName = c.role || '';
                         const knownAs  = c.known_as || '';
-                        const pts = parseBezierPts(c.value);
                         const uc = easingUseCase(c.value);
+                        const desc = easingDescription(c.value);
                         const ucChip = uc
                             ? `<span style="flex-shrink:0; font-size:0.62rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:${uc.color}; background:${uc.color}18; border:1px solid ${uc.color}30; border-radius:4px; padding:1px 5px;">${uc.label}</span>`
                             : '';
                         return `
-                        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);">
-                            ${bezierSVG(pts)}
-                            ${animDot(c.value)}
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="font-family: 'SF Mono', monospace; font-size: 0.7rem; color: #c9b8ff; word-break: break-all;">${c.value || ''}</div>
-                                <div style="font-size: 0.67rem; color: #666; margin-top: 1px;">
-                                    ${roleName ? '<span style="color: #0a84ff; text-transform: capitalize;">' + roleName + '</span>' : ''}
-                                    ${knownAs ? ' &middot; <span style="color: #888;">' + knownAs + '</span>' : ''}
+                        <div style="padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04);">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="font-size: 0.82rem; color: var(--text-primary); font-weight: 500;">${desc.short}</div>
+                                    <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap;">
+                                        <span style="font-family: var(--font-mono); font-size: 0.65rem; color: #c9b8ff; word-break: break-all;">${c.value || ''}</span>
+                                        ${roleName ? '<span style="font-size: 0.6rem; color: #0a84ff; text-transform: capitalize;">' + roleName + '</span>' : ''}
+                                        ${knownAs && knownAs !== (c.value || '').trim().toLowerCase() ? '<span style="font-size: 0.6rem; color: #666;">' + knownAs + '</span>' : ''}
+                                    </div>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                                    ${ucChip}
+                                    <div style="font-size: 0.68rem; color: #555; white-space: nowrap;">${c.count || 0}×</div>
                                 </div>
                             </div>
-                            ${ucChip}
-                            <div style="font-size: 0.68rem; color: #555; white-space: nowrap;">${c.count || 0}×</div>
+                            <div class="motion-track">
+                                <div class="motion-track-dot" style="--easing-fn:${(c.value || '').trim()};"></div>
+                            </div>
                         </div>`;
                     }).join('')}
                     ${curves.length > 8 ? `<div style="font-size: 0.72rem; color: #0a84ff; margin-top: 4px;">+${curves.length - 8} more curves</div>` : ''}
@@ -8130,35 +8164,43 @@
                 for (let i = 0; i < FRAMES; i++) {
                     const t = i / (FRAMES - 1);
                     const pos = evaluateBezier(t, cssValue);
-                    dots += `<div style="position:absolute; left:${pos * 100}%; width:8px; height:8px; border-radius:50%; background:var(--accent); opacity:0.22; transform:translateX(-50%);"></div>`;
+                    dots += `<div style="position:absolute; left:${pos * 100}%; width:6px; height:6px; border-radius:50%; background:var(--accent); opacity:0.18; transform:translateX(-50%);"></div>`;
                 }
                 return `
-                    <div style="position:relative; height:20px; margin:var(--space-1) 0;">
+                    <div style="position:relative; height:14px; margin:2px 0;">
                         ${dots}
                     </div>
-                    <div style="font-size:0.6rem; color:var(--text-disabled); text-align:center;">${label}</div>
+                    ${label ? `<div style="font-size:0.58rem; color:var(--text-disabled); text-align:center;">${label}</div>` : ''}
                 `;
             }
 
             const topCurves = pickRepresentativeCurves(curves);
             const comparisonHTML = topCurves.length > 0 ? `
-                <div style="display:flex; gap:var(--space-3); margin:var(--space-3) 0; padding:var(--space-3); background:var(--surface-0); border-radius:var(--radius-md);">
-                    ${topCurves.map(c => {
+                <div style="margin:var(--space-3) 0; padding:var(--space-4); background:var(--surface-0); border-radius:var(--radius-md);">
+                    <div style="font-size:0.68rem; color:var(--text-disabled); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:var(--space-3);">How This Site's Motion Feels</div>
+                    ${topCurves.map((c, idx) => {
                         const cssVal = (c.value || '').trim();
-                        const label = c.known_as || c.role || cssVal.substring(0, 20);
+                        const desc = easingDescription(c.value);
                         const roleLabel = c._role || '';
+                        const roleColor = roleLabel === 'Most used' ? '#c9b8ff' : roleLabel === 'Linear baseline' ? 'var(--text-disabled)' : '#ff9f0a';
+                        const isLast = idx === topCurves.length - 1;
                         return `
-                        <div style="flex:1; text-align:center;">
-                            <div style="height:40px; display:flex; align-items:center; justify-content:flex-start; overflow:hidden; margin-bottom:var(--space-1);">
-                                <div style="width:40px; height:40px; background:var(--accent); border-radius:var(--radius-sm); animation:motionDemo 2s ${cssVal} infinite alternate; flex-shrink:0;"></div>
+                        <div style="display:grid; grid-template-columns:140px 1fr; gap:var(--space-3); align-items:start; ${isLast ? '' : 'margin-bottom:var(--space-4); padding-bottom:var(--space-3); border-bottom:1px solid var(--border-subtle);'}">
+                            <div>
+                                <div style="font-size:0.62rem; color:${roleColor}; text-transform:uppercase; letter-spacing:0.05em; font-weight:600; margin-bottom:2px;">${roleLabel}</div>
+                                <div style="font-size:0.82rem; color:var(--text-primary); font-weight:500; line-height:1.35;">${desc.short}</div>
+                                <div style="font-family:var(--font-mono); font-size:0.62rem; color:var(--text-tertiary); margin-top:4px; word-break:break-all;">${c.known_as || cssVal.substring(0, 30)}</div>
+                                <div style="font-size:0.6rem; color:var(--text-disabled); margin-top:2px;">${c.count || 0}× used</div>
                             </div>
-                            ${createFrameDots(cssVal, roleLabel)}
-                            <div style="font-family:var(--font-mono); font-size:0.65rem; color:var(--text-tertiary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:var(--space-1);">${label}</div>
-                            <div style="font-size:0.6rem; color:var(--text-disabled);">${c.count||0}x</div>
+                            <div>
+                                <div class="race-track">
+                                    <div class="race-track-element" style="--easing-fn:${cssVal};"></div>
+                                </div>
+                                ${createFrameDots(cssVal, '')}
+                            </div>
                         </div>`;
                     }).join('')}
                 </div>
-                <style>@keyframes motionDemo { from { transform: translateX(0); } to { transform: translateX(calc(100% - 40px)); } }</style>
             ` : '';
 
             return `
@@ -9886,7 +9928,12 @@
                     });
                 }
                 if (mt.easing_palette) {
-                    md += `- **Easing Curves:** ${mt.easing_palette.length} unique\n`;
+                    const epCurves = Array.isArray(mt.easing_palette) ? mt.easing_palette : (mt.easing_palette.curves || []);
+                    md += `- **Easing Curves:** ${epCurves.length} unique\n`;
+                    epCurves.slice(0, 5).forEach(c => {
+                        const desc = typeof easingDescription === 'function' ? easingDescription(c.value) : { short: c.value };
+                        md += `  - ${desc.short}: \`${c.value}\` (${c.count || 0}×)${c.role ? ' — ' + c.role : ''}\n`;
+                    });
                 }
                 md += `\n`;
             }
