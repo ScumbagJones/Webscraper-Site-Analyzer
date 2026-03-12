@@ -18,6 +18,7 @@ Instead of just 5 basic metrics, we extract EVERYTHING:
 """
 
 import asyncio
+import time
 from playwright.async_api import async_playwright
 from urllib.parse import urlparse, urljoin
 import json
@@ -36,6 +37,10 @@ from spatial_composition_analyzer import SpatialCompositionAnalyzer
 from extractors.base import ExtractionContext
 from extractors.cdp_animation_extractor import CdpAnimationExtractor
 from extractors.axe_contrast_extractor import AxeContrastExtractor
+from extractors.css_efficiency import CSSEfficiencyExtractor
+from extractors.css_specificity import CSSSpecificityExtractor
+from extractors.security import SecurityExtractor
+from extractors.performance import PerformanceExtractor
 
 # Import stealth mode for bot-protected sites
 try:
@@ -728,14 +733,18 @@ class DeepEvidenceEngine:
 
         # Extract all metrics with error handling
         evidence = {}
+        _extractor_timings = {}  # Track per-extractor duration
+        _extraction_start = time.perf_counter()
 
-        # Helper function to safely extract metrics
+        # Helper function to safely extract metrics (with timing)
         async def safe_extract(name, coro_or_func, *args):
+            t0 = time.perf_counter()
             try:
                 if asyncio.iscoroutinefunction(coro_or_func):
-                    return await coro_or_func(*args)
+                    result = await coro_or_func(*args)
                 else:
-                    return coro_or_func(*args)
+                    result = coro_or_func(*args)
+                return result
             except Exception as e:
                 print(f"   ⚠️  Warning: {name} extraction failed: {str(e)[:100]}")
                 return {
@@ -743,6 +752,8 @@ class DeepEvidenceEngine:
                     'confidence': 0,
                     'error': str(e)[:200]
                 }
+            finally:
+                _extractor_timings[name] = round(time.perf_counter() - t0, 3)
 
         # Focus gating: skip extractors not relevant to the selected focus
         _focus_keys = FOCUS_EXTRACTORS.get(analysis_focus)
@@ -761,13 +772,17 @@ class DeepEvidenceEngine:
         if _should_extract('accessibility'):
             evidence['accessibility'] = await safe_extract('Accessibility', self._extract_accessibility, page)
         if _should_extract('performance'):
-            evidence['performance'] = await safe_extract('Performance', self._extract_performance, page)
+            print("   ⚡ Measuring performance...")
+            _perf_ctx = ExtractionContext(page=page, url=url, html_content=html_content, network_requests=self.network_requests, network_responses=self.network_responses, evidence=evidence)
+            evidence['performance'] = await safe_extract('Performance', PerformanceExtractor().extract, _perf_ctx)
         if _should_extract('dom_depth'):
             evidence['dom_depth'] = await safe_extract('DOM Depth', self._extract_dom_depth, page)
         if _should_extract('seo'):
             evidence['seo'] = await safe_extract('SEO', self._extract_seo, page)
         if _should_extract('security'):
-            evidence['security'] = await safe_extract('Security', self._extract_security, page)
+            print("   🔒 Checking security...")
+            _sec_ctx = ExtractionContext(page=page, url=url, html_content=html_content, network_requests=self.network_requests, network_responses=self.network_responses, evidence=evidence)
+            evidence['security'] = await safe_extract('Security', SecurityExtractor().extract, _sec_ctx)
         if _should_extract('api_patterns'):
             evidence['api_patterns'] = await safe_extract('API Patterns', self._analyze_api_patterns)
         if _should_extract('site_architecture'):
@@ -882,6 +897,18 @@ class DeepEvidenceEngine:
             _axe_ctx = ExtractionContext(page=page, url=url, html_content=html_content, evidence=evidence)
             evidence['contrast_a11y'] = await safe_extract('Axe Contrast', AxeContrastExtractor().extract, _axe_ctx)
 
+        # CSS Efficiency (unused CSS detection via CDP Coverage)
+        if _should_extract('css_efficiency'):
+            print("\n📊 Analyzing CSS efficiency...")
+            _css_eff_ctx = ExtractionContext(page=page, url=url, html_content=html_content, evidence=evidence)
+            evidence['css_efficiency'] = await safe_extract('CSS Efficiency', CSSEfficiencyExtractor().extract, _css_eff_ctx)
+
+        # CSS Specificity (cascade health + methodology detection)
+        if _should_extract('css_specificity'):
+            print("\n🎯 Analyzing CSS specificity...")
+            _css_spec_ctx = ExtractionContext(page=page, url=url, html_content=html_content, evidence=evidence)
+            evidence['css_specificity'] = await safe_extract('CSS Specificity', CSSSpecificityExtractor().extract, _css_spec_ctx)
+
         # Screenshot with Annotations — only if visual_hierarchy was extracted
         if _should_extract('visual_hierarchy') and evidence.get('visual_hierarchy') and evidence['visual_hierarchy'].get('pattern'):
             print("\n📸 Capturing annotated screenshot...")
@@ -911,6 +938,21 @@ class DeepEvidenceEngine:
             import logging
             logging.getLogger(__name__).debug(f"Could not count DOM nodes (non-critical): {e}")
             total_nodes = 0
+
+        # Scan timing summary
+        _extraction_elapsed = round(time.perf_counter() - _extraction_start, 2)
+        _sorted_timings = sorted(_extractor_timings.items(), key=lambda x: x[1], reverse=True)
+        _slowest = _sorted_timings[0] if _sorted_timings else ('none', 0)
+
+        evidence['scan_timing'] = {
+            'pattern': f'Scan completed in {_extraction_elapsed}s — slowest: {_slowest[0]} ({_slowest[1]}s)',
+            'confidence': 100,
+            'total_extraction_seconds': _extraction_elapsed,
+            'per_extractor': {name: secs for name, secs in _sorted_timings},
+            'slowest_extractor': _slowest[0],
+            'slowest_seconds': _slowest[1],
+            'extractor_count': len(_extractor_timings),
+        }
 
         evidence['meta_info'] = {
             'url': url,
@@ -1661,6 +1703,7 @@ class DeepEvidenceEngine:
             print(f"\n🌐 Loading {self.url}...")
             access_strategy = 'playwright_full'
             degraded_mode = False
+            _page_load_start = time.perf_counter()
 
             try:
                 # Try networkidle first (best for SPAs)
@@ -1749,6 +1792,8 @@ class DeepEvidenceEngine:
 
             # FULL ACCESS MODE: Continue with normal extraction
             await asyncio.sleep(3)  # Let JS render
+            _page_load_seconds = round(time.perf_counter() - _page_load_start, 2)
+            print(f"   ⏱️  Page loaded in {_page_load_seconds}s")
 
             # Get page HTML
             html_content = await page.content()
@@ -1758,6 +1803,15 @@ class DeepEvidenceEngine:
                 # Single page analysis (original behavior)
                 print(f"   🔍 Single page analysis mode")
                 self.evidence = await self._analyze_single_page(page, self.url, html_content)
+                # Inject page load timing into scan_timing
+                if 'scan_timing' in self.evidence:
+                    self.evidence['scan_timing']['page_load_seconds'] = _page_load_seconds
+                    total = _page_load_seconds + self.evidence['scan_timing'].get('total_extraction_seconds', 0)
+                    self.evidence['scan_timing']['total_seconds'] = round(total, 2)
+                    self.evidence['scan_timing']['pattern'] = (
+                        f"Total {total:.1f}s — page load {_page_load_seconds:.1f}s, "
+                        f"extraction {self.evidence['scan_timing'].get('total_extraction_seconds', 0):.1f}s"
+                    )
 
             elif self.analysis_mode == 'smart-nav':
                 # Multi-page analysis via navigation

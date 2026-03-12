@@ -333,6 +333,81 @@ def extract_styles():
         }), 500
 
 
+@app.route('/api/cloudflare-crawl', methods=['POST'])
+def cloudflare_crawl():
+    """
+    Crawl a website using Cloudflare Browser Rendering /crawl API.
+
+    Requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN env vars.
+
+    Request body:
+    {
+        "site_url": "https://stripe.com",
+        "limit": 20,        // max pages (default 10)
+        "depth": 3,          // max link depth (default 2)
+        "formats": ["markdown"],  // html, markdown, json
+        "render": true       // use headless browser (default true)
+    }
+
+    Returns:
+    {
+        "success": true,
+        "crawl_id": "abc123",
+        "status": "completed",
+        "pages": [...],
+        "urls": ["https://stripe.com/docs", ...],
+        "total": 20
+    }
+    """
+    from cloudflare_crawl import CloudflareCrawler, CloudflareNotConfigured, is_cloudflare_available
+
+    if not is_cloudflare_available():
+        return jsonify({
+            'error': 'Cloudflare not configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN environment variables.',
+            'available': False
+        }), 503
+
+    data = request.json
+    site_url = data.get('site_url')
+    if not site_url:
+        return jsonify({'error': 'site_url required'}), 400
+
+    site_url, url_error = validate_url(site_url)
+    if url_error:
+        return jsonify({'error': url_error}), 400
+
+    limit = min(int(data.get('limit', 10)), 1000)  # Cap at 1000 for safety
+    depth = min(int(data.get('depth', 2)), 10)
+    formats = data.get('formats', ['markdown'])
+    render = data.get('render', True)
+
+    try:
+        crawler = CloudflareCrawler()
+        result = run_async(crawler.crawl(
+            site_url,
+            limit=limit,
+            depth=depth,
+            formats=formats,
+            render=render,
+            timeout=300
+        ))
+
+        return jsonify({
+            'success': True,
+            'crawl_id': result.get('crawl_id', ''),
+            'status': result.get('status', 'unknown'),
+            'pages': result.get('pages', [])[:50],  # Cap response size
+            'urls': result.get('urls', []),
+            'total': result.get('total', 0)
+        })
+
+    except CloudflareNotConfigured as e:
+        return jsonify({'error': str(e), 'available': False}), 503
+    except Exception as e:
+        logger.error(f"Cloudflare crawl failed: {e}", exc_info=True)
+        return jsonify({'error': f'Cloudflare crawl failed: {str(e)[:200]}'}), 500
+
+
 @app.route('/api/discover-urls', methods=['POST'])
 def discover_urls():
     """

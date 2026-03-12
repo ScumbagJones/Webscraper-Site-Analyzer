@@ -223,5 +223,47 @@ def _clean_for_mcp(obj, depth: int = 0):
         return None
 
 
+@mcp.tool()
+async def cloudflare_crawl(url: str, limit: int = 10, depth: int = 2) -> dict:
+    """
+    Crawl a website using Cloudflare Browser Rendering and return discovered pages with content.
+
+    Uses Cloudflare's /crawl API to discover and fetch pages from a website.
+    Returns page URLs and content in Markdown format.
+    Requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN env vars.
+
+    Args:
+        url: Starting URL to crawl (e.g., "https://stripe.com")
+        limit: Maximum pages to crawl (default 10, max 1000)
+        depth: Maximum link depth from starting URL (default 2)
+
+    Returns:
+        Dict with status, crawl_id, urls, pages (with content), and total count.
+    """
+    from cloudflare_crawl import CloudflareCrawler, CloudflareNotConfigured, is_cloudflare_available
+
+    if not is_cloudflare_available():
+        return {
+            'error': 'Cloudflare not configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.',
+            'available': False
+        }
+
+    try:
+        crawler = CloudflareCrawler()
+        result = await crawler.crawl(
+            url,
+            limit=min(limit, 1000),
+            depth=min(depth, 10),
+            formats=['markdown'],
+            render=True,
+            timeout=300
+        )
+        return _clean_for_mcp(result)
+    except CloudflareNotConfigured as e:
+        return {'error': str(e), 'available': False}
+    except Exception as e:
+        return {'error': f'Cloudflare crawl failed: {str(e)[:200]}'}
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

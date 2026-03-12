@@ -4894,7 +4894,10 @@
                     name: 'Technical Performance',
                     icon: '⚡',
                     metrics: [
+                        { key: 'scan_timing', icon: '⏱', title: 'Scan Timing' },
                         { key: 'performance', icon: '⚡', title: 'Performance' },
+                        { key: 'css_efficiency', icon: '📊', title: 'CSS Efficiency' },
+                        { key: 'css_specificity', icon: '⚖', title: 'CSS Specificity' },
                         { key: 'accessibility', icon: '♿', title: 'Accessibility' },
                         { key: 'contrast_a11y', icon: '🔆', title: 'Contrast Audit' },
                         { key: 'seo', icon: '🔍', title: 'SEO' },
@@ -5329,6 +5332,12 @@
                 bodyHTML = createCdpAnimationsCard(icon, title, data, confidenceClass);
             } else if (title === 'Contrast Audit') {
                 bodyHTML = createContrastAuditCard(icon, title, data, confidenceClass);
+            } else if (title === 'Scan Timing') {
+                bodyHTML = createScanTimingCard(icon, title, data, confidenceClass);
+            } else if (title === 'CSS Efficiency') {
+                bodyHTML = createCSSEfficiencyCard(icon, title, data, confidenceClass);
+            } else if (title === 'CSS Specificity') {
+                bodyHTML = createCSSSpecificityCard(icon, title, data, confidenceClass);
             } else {
                 bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
             }
@@ -5493,7 +5502,8 @@
                 case 'SEO':
                     return safeDisplayValue(data.pattern);
                 case 'Security':
-                    return `Score: ${data.confidence || 0}/100 — ${(data.confidence||0) >= 80 ? 'strong posture' : (data.confidence||0) >= 60 ? 'moderate posture' : 'needs attention'}`;
+                    if (data.grade && data.score != null) return `${data.grade} — ${data.score}/100 points`;
+                    return safeDisplayValue(data.pattern);
                 case 'Third-Party':
                     return safeDisplayValue(data.pattern);
                 case 'Accessibility':
@@ -7469,78 +7479,89 @@
             const cwv         = data.core_web_vitals || {};
             const timings     = data.timings        || {};
             const resources   = data.resources      || {};
-            const cwvSummary  = cwv.summary         || {};
-            const cwvMetrics  = [
-                { key: 'lcp', label: 'LCP',  unit: 'ms',  good: 2500, poor: 4000 },
-                { key: 'fid', label: 'FID',  unit: 'ms',  good: 100,  poor: 300  },
-                { key: 'cls', label: 'CLS',  unit: '',    good: 0.1,  poor: 0.25 },
-                { key: 'inp', label: 'INP',  unit: 'ms',  good: 200,  poor: 500  }
+            const speedLabel  = data.speed_label    || '';
+            const cwvGrade    = data.web_vitals_grade || '';
+            const cwvDetails  = data.web_vitals_details || {};
+            const sizes       = data.transfer_sizes || timings.transfer_sizes || {};
+            const rb          = data.render_blocking || timings.render_blocking || {};
+            const tp          = data.third_party    || timings.third_party || {};
+            const recs        = data.recommendations || [];
+
+            // Speed hero — plain language
+            const loadMs = timings.load_complete || 0;
+            const loadSec = (loadMs / 1000).toFixed(1);
+            const speedColor = loadMs < 1500 ? '#68d68d' : loadMs < 3000 ? '#7ec8e3' : loadMs < 5000 ? '#ff9f0a' : '#ff6b6b';
+
+            // CWV grade badge
+            const gradeColors = { A: '#68d68d', B: '#7ec8e3', C: '#ff9f0a', D: '#ff6b6b', F: '#ff4444', 'N/A': '#555' };
+            const gradeColor = gradeColors[cwvGrade] || '#555';
+
+            // ── CWV detail rows ──
+            const cwvLabels = { lcp: 'Largest paint', fid: 'Input delay', cls: 'Layout shift', inp: 'Interaction', ttfb: 'Server response' };
+            const cwvRows = Object.entries(cwvDetails).map(([key, v]) => {
+                const rColor = v.rating === 'Good' ? '#68d68d' : v.rating === 'Poor' ? '#ff6b6b' : '#ff9f0a';
+                const display = v.label || (v.value != null ? (key === 'cls' ? v.value.toFixed(3) : v.value_ms + 'ms') : '—');
+                return `
+                    <div style="display:flex; align-items:center; gap:6px; padding:2px 0;">
+                        <span style="width:8px; height:8px; border-radius:50%; background:${rColor}; flex-shrink:0;"></span>
+                        <span style="flex:1; font-size:0.72rem; color:#999;">${cwvLabels[key] || key.toUpperCase()}</span>
+                        <span style="font-size:0.72rem; color:#ccc; font-family:'SF Mono',monospace;">${display}</span>
+                        <span style="font-size:0.62rem; color:${rColor};">${v.rating}</span>
+                    </div>`;
+            }).join('');
+
+            // ── Transfer sizes ──
+            const sizeOrder = [
+                { key: 'js', label: 'JavaScript', color: '#ff9f0a' },
+                { key: 'css', label: 'CSS', color: '#c9b8ff' },
+                { key: 'image', label: 'Images', color: '#7ec8e3' },
+                { key: 'font', label: 'Fonts', color: '#f09dff' }
             ];
-
-            // ── CWV gauge row ──
-            const gaugeHTML = cwvMetrics.map(m => {
-                const metric = cwv[m.key] || {};
-                const val    = metric.value;
-                const rating = metric.rating || 'unknown';
-                // Color: good=#68d68d, needs-improvement=#ff9f0a, poor=#ff6b6b, unknown=#666
-                const colorMap = { good: '#68d68d', 'needs-improvement': '#ff9f0a', poor: '#ff6b6b' };
-                // LCP/FID/INP require real user interaction — headless always returns 0. Show as n/a.
-                const headlessZero = (val === 0 && (m.key === 'lcp' || m.key === 'fid' || m.key === 'inp'));
-                const color      = headlessZero ? '#555' : (colorMap[rating] || '#666');
-                const displayVal = headlessZero ? '—' : (val == null ? 'n/a' : (m.key === 'cls' ? val.toFixed(3) : Math.round(val) + m.unit));
-                const ratingLabel = headlessZero ? 'n/a' : (rating !== 'unknown' ? rating : 'n/a');
+            const sizeRows = sizeOrder.filter(s => (sizes[s.key] || 0) > 0).map(s => {
+                const kb = sizes[s.key];
+                const barPct = Math.min(100, (kb / 500) * 100);
                 return `
-                    <div style="text-align:center; flex:1;">
-                        <div style="width:44px; height:44px; border-radius:50%; border:3px solid ${color}; display:flex; align-items:center; justify-content:center; margin:0 auto 4px; background:rgba(255,255,255,0.03);">
-                            <span style="font-size:0.7rem; font-weight:700; color:${color}; font-family:'SF Mono',monospace;">${displayVal}</span>
+                    <div style="display:flex; align-items:center; gap:6px; padding:2px 0;">
+                        <span style="width:70px; flex-shrink:0; font-size:0.72rem; color:#999;">${s.label}</span>
+                        <div style="flex:1; height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
+                            <div style="height:100%; width:${barPct}%; background:${s.color}; border-radius:2px;"></div>
                         </div>
-                        <div style="font-size:0.68rem; color:#888; font-weight:600; letter-spacing:0.02em;">${m.label}</div>
-                        <div style="font-size:0.6rem; color:${color}; margin-top:1px;">${ratingLabel}</div>
-                    </div>
-                `;
+                        <span style="width:45px; text-align:right; font-size:0.68rem; color:#ccc; font-family:'SF Mono',monospace;">${kb}KB</span>
+                    </div>`;
             }).join('');
 
-            // ── Key timings ──
-            const timingRows = [
-                { label: 'FCP',              val: timings.fcp,              unit: 'ms' },
-                { label: 'TTFB',             val: timings.ttfb,            unit: 'ms' },
-                { label: 'DOM Interactive',  val: timings.dom_interactive, unit: 'ms' },
-                { label: 'DOM Content Loaded', val: timings.dom_content_loaded, unit: 'ms' }
-            ].filter(t => t.val != null && t.val > 0);
-
-            const timingHTML = timingRows.map(t => {
-                const ms = Math.round(t.val);
-                // Simple bar: scale 0-3000ms → 0-100% width
-                const pct = Math.min(100, (ms / 3000) * 100);
-                const barColor = ms < 1000 ? '#68d68d' : ms < 2500 ? '#ff9f0a' : '#ff6b6b';
-                return `
-                    <div style="display:flex; align-items:center; gap:8px; padding:3px 0;">
-                        <div style="width:90px; flex-shrink:0; font-size:0.72rem; color:#999;">${t.label}</div>
-                        <div style="flex:1; height:5px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
-                            <div style="height:100%; width:${pct}%; background:${barColor}; border-radius:3px;"></div>
-                        </div>
-                        <div style="width:52px; text-align:right; font-size:0.72rem; color:#ccc; font-family:'SF Mono',monospace;">${ms}ms</div>
-                    </div>
-                `;
-            }).join('');
-
-            // ── Resource breakdown ──
+            // ── Resource counts ──
             const resOrder = ['script','image','stylesheet','font','fetch','xhr','document'];
             const resColors = { script:'#ff9f0a', image:'#7ec8e3', stylesheet:'#c9b8ff', font:'#f09dff', fetch:'#68d68d', xhr:'#68d68d', document:'#aaa' };
             const totalRes  = Object.values(resources).reduce((a,b) => a+b, 0);
-            const resHTML   = resOrder.filter(k => resources[k]).map(k => {
-                const count = resources[k];
-                const pct   = Math.round((count / totalRes) * 100);
-                const color = resColors[k] || '#aaa';
-                return `<span style="font-size:0.7rem; color:${color}; margin-right:6px;"><strong>${count}</strong> ${k}</span>`;
-            }).join('');
-
-            // ── Stacked resource bar ──
             const resBarParts = resOrder.filter(k => resources[k]).map(k => {
                 const pct   = (resources[k] / totalRes) * 100;
                 const color = resColors[k] || '#aaa';
                 return `<div style="height:100%; width:${pct}%; background:${color};" title="${k}: ${resources[k]}"></div>`;
             }).join('');
+            const resLabels = resOrder.filter(k => resources[k]).map(k => {
+                const color = resColors[k] || '#aaa';
+                return `<span style="font-size:0.68rem; color:${color};"><strong>${resources[k]}</strong> ${k}</span>`;
+            }).join(' · ');
+
+            // ── Warnings ──
+            const warnings = [];
+            if (rb.scripts > 3) warnings.push(`${rb.scripts} render-blocking scripts`);
+            if (tp.script_count > 8) warnings.push(`${tp.script_count} third-party scripts`);
+            if (sizes.total > 3000) warnings.push(`${sizes.total}KB total page weight`);
+            const warningsHTML = warnings.length ? `
+                <div style="margin-top:0.4rem;">
+                    ${warnings.map(w => `<div style="font-size:0.68rem; color:#ff9f0a; padding:1px 0;">⚠ ${w}</div>`).join('')}
+                </div>` : '';
+
+            // ── Recommendations ──
+            const recsHTML = recs.length ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-top:0.3rem;">
+                    <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Suggestions</div>
+                    ${recs.slice(0, 3).map(r => `<div style="font-size:0.72rem; color:#ff9f0a; padding:2px 0; display:flex; gap:6px;">
+                        <span style="flex-shrink:0;">▸</span>${r}
+                    </div>`).join('')}
+                </div>` : '';
 
             return `
                 <div class="metric-header">
@@ -7551,29 +7572,46 @@
                     <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
                 <div class="metric-body">
-                    <!-- Core Web Vitals gauges -->
-                    <div style="display:flex; gap:4px; margin-bottom:0.7rem;">
-                        ${gaugeHTML}
+                    <!-- Speed hero -->
+                    <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.7rem;">
+                        <div style="flex-shrink:0;">
+                            <div style="font-size:1.8rem; font-weight:800; color:${speedColor}; font-family:var(--font-display); line-height:1;">${loadMs > 0 ? loadSec + 's' : '—'}</div>
+                            <div style="font-size:0.68rem; color:${speedColor}; margin-top:2px;">${speedLabel}</div>
+                        </div>
+                        ${cwvGrade && cwvGrade !== 'N/A' ? `
+                        <div style="margin-left:auto; text-align:center;">
+                            <div style="width:40px; height:40px; border-radius:var(--radius-sm); border:2px solid ${gradeColor}; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.02);">
+                                <span style="font-size:1.1rem; font-weight:800; color:${gradeColor}; font-family:var(--font-display);">${cwvGrade}</span>
+                            </div>
+                            <div style="font-size:0.58rem; color:#666; margin-top:2px;">Vitals</div>
+                        </div>` : ''}
                     </div>
 
-                    <!-- Key timings -->
-                    ${timingHTML ? `
-                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-bottom:0.5rem;">
-                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Timings</div>
-                        ${timingHTML}
+                    <!-- Core Web Vitals detail rows -->
+                    ${cwvRows ? `
+                    <div style="margin-bottom:0.5rem;">
+                        ${cwvRows}
                     </div>` : ''}
 
-                    <!-- Resource breakdown -->
+                    <!-- Transfer sizes -->
+                    ${sizeRows ? `
+                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-bottom:0.5rem;">
+                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Page Weight${sizes.total ? ` (${sizes.total}KB)` : ''}</div>
+                        ${sizeRows}
+                    </div>` : ''}
+
+                    <!-- Resource breakdown bar -->
                     ${totalRes ? `
                     <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
-                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Resources <span style="color:#666;">(${totalRes} total)</span></div>
-                        <div style="height:8px; border-radius:4px; overflow:hidden; display:flex; margin-bottom:6px; background:rgba(255,255,255,0.05);">
+                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Requests <span style="color:#666;">(${totalRes})</span></div>
+                        <div style="height:6px; border-radius:3px; overflow:hidden; display:flex; margin-bottom:4px; background:rgba(255,255,255,0.05);">
                             ${resBarParts}
                         </div>
-                        <div style="display:flex; flex-wrap:wrap; gap:2px;">
-                            ${resHTML}
-                        </div>
+                        <div style="font-size:0.68rem; color:#888;">${resLabels}</div>
                     </div>` : ''}
+
+                    ${warningsHTML}
+                    ${recsHTML}
                 </div>
             `;
         }
@@ -7581,44 +7619,44 @@
         // ── Security Card ─────────────────────────────────────────────
         function createSecurityCard(icon, title, data, confidenceClass) {
             const score   = data.score || 0;
+            const grade   = data.grade || 'F';
+            const checks  = data.checks || {};
             const details = data.details || {};
             const recs    = data.recommendations || [];
 
-            const scoreColor = score >= 80 ? '#68d68d' : score >= 50 ? '#ff9f0a' : '#ff6b6b';
+            const gradeColors = { A: '#68d68d', B: '#7ec8e3', C: '#ff9f0a', D: '#ff6b6b', F: '#ff4444' };
+            const gradeColor = gradeColors[grade] || '#ff6b6b';
 
-            // Header checks with point values — mirrors the scoring formula
-            const checks = [
-                { label: 'HTTPS Enabled',                   pass: !!details.https,                                            pts: 40, tip: 'Encrypts data between browser and server (the lock icon in your URL bar)' },
-                { label: 'Content-Security-Policy',         pass: !!details.csp_header,                                       pts: 20, tip: 'Blocks unauthorized scripts from running — prevents XSS attacks' },
-                { label: 'Strict-Transport-Security',       pass: !!(details.security_headers || {})['strict-transport-security'], pts: 25, tip: 'Forces browsers to always use HTTPS, even if someone types http://' },
-                { label: 'X-Frame-Options',                 pass: !!(details.security_headers || {})['x-frame-options'],     pts: 15, tip: 'Prevents the site from being embedded in iframes on other sites (clickjacking protection)' }
-            ];
+            // Build check rows from new 12-check structure
+            const checkLabels = {
+                https: 'HTTPS Enabled',
+                hsts: 'Strict Transport Security',
+                csp: 'Content Security Policy',
+                x_frame_options: 'Clickjacking Protection',
+                x_content_type_options: 'MIME Sniffing Block',
+                referrer_policy: 'Referrer Policy',
+                permissions_policy: 'Permissions Policy',
+                sri: 'Script Integrity (SRI)',
+                no_mixed_content: 'No Mixed Content',
+                secure_cookies: 'Secure Cookies',
+                cors_policy: 'CORS Policy',
+                security_txt: 'security.txt'
+            };
 
-            const checksHTML = checks.map(c => `
-                <div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:0.82rem; color:${c.pass ? '#68d68d' : '#ff6b6b'}; flex-shrink:0;">${c.pass ? '✓' : '✗'}</span>
-                        <span style="flex:1; font-size:0.78rem; color:${c.pass ? '#ccc' : '#888'};">${c.label}</span>
-                        <span style="font-size:0.68rem; color:#555; font-family:'SF Mono',monospace;">+${c.pts}</span>
-                    </div>
-                    ${c.tip ? `<div style="font-size:0.68rem; color:#666; margin-left:1.35rem; margin-top:0.15rem;">${c.tip}</div>` : ''}
+            const checksHTML = Object.entries(checks).map(([key, c]) => `
+                <div style="display:flex; align-items:center; gap:6px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
+                    <span style="font-size:0.78rem; color:${c.pass ? '#68d68d' : '#ff6b6b'}; flex-shrink:0; width:14px; text-align:center;">${c.pass ? '✓' : '✗'}</span>
+                    <span style="flex:1; font-size:0.72rem; color:${c.pass ? '#bbb' : '#777'};">${checkLabels[key] || key}</span>
+                    <span style="font-size:0.62rem; color:#555; font-family:'SF Mono',monospace;">${c.points}/${c.max}</span>
                 </div>
             `).join('');
 
             const recsHTML = recs.length ? `
                 <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-top:0.2rem;">
                     <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Recommendations</div>
-                    ${recs.map(r => `<div style="font-size:0.75rem; color:#ff9f0a; padding:3px 0; display:flex; gap:6px; align-items:flex-start;">
+                    ${recs.slice(0, 4).map(r => `<div style="font-size:0.72rem; color:#ff9f0a; padding:2px 0; display:flex; gap:6px; align-items:flex-start;">
                         <span style="flex-shrink:0; color:#ff9f0a;">▸</span>${r}
                     </div>`).join('')}
-                </div>
-            ` : '';
-
-            // CSP value preview if present
-            const cspPreview = details.csp_header ? `
-                <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-top:0.2rem;">
-                    <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">CSP Policy</div>
-                    <div style="background:rgba(255,255,255,0.04); border-radius:6px; padding:8px 10px; font-family:'SF Mono',monospace; font-size:0.7rem; color:#c9b8ff; max-height:80px; overflow-y:auto; white-space:pre-wrap; word-break:break-all;">${details.csp_header.substring(0, 300)}</div>
                 </div>
             ` : '';
 
@@ -7631,32 +7669,255 @@
                     <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
                 <div class="metric-body">
-                    <!-- Score ring + bar -->
+                    <!-- Grade badge + score -->
                     <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.7rem;">
-                        <div style="flex-shrink:0; width:64px; height:64px; border-radius:50%; border:5px solid ${scoreColor}; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.02);">
-                            <div style="text-align:center;">
-                                <div style="font-size:1.3rem; font-weight:700; color:${scoreColor}; line-height:1;">${score}</div>
-                                <div style="font-size:0.55rem; color:#666;">/100</div>
-                            </div>
+                        <div style="flex-shrink:0; width:56px; height:56px; border-radius:var(--radius-md); border:3px solid ${gradeColor}; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.02);">
+                            <span style="font-size:1.6rem; font-weight:800; color:${gradeColor}; font-family:var(--font-display);">${grade}</span>
                         </div>
                         <div style="flex:1;">
+                            <div style="font-size:0.82rem; color:#ccc; font-weight:600; margin-bottom:3px;">${score}/100 points</div>
                             <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden;">
-                                <div style="height:100%; width:${score}%; background:${scoreColor}; border-radius:3px; transition:width 0.6s;"></div>
+                                <div style="height:100%; width:${score}%; background:${gradeColor}; border-radius:3px; transition:width 0.6s;"></div>
                             </div>
-                            <div style="font-size:0.72rem; color:#666; margin-top:3px;">${score >= 80 ? 'Strong security posture' : score >= 50 ? 'Missing key headers' : 'Needs attention'}</div>
+                            <div style="font-size:0.68rem; color:#666; margin-top:3px;">${score >= 90 ? 'Excellent security posture' : score >= 75 ? 'Good — minor gaps' : score >= 60 ? 'Fair — several missing protections' : score >= 40 ? 'Weak — important protections missing' : 'Poor — needs immediate attention'}</div>
                         </div>
                     </div>
 
-                    <!-- Header checklist -->
+                    <!-- 12-check checklist -->
                     <div style="margin-bottom:0.2rem;">
                         ${checksHTML}
                     </div>
 
-                    <!-- CSP preview -->
-                    ${cspPreview}
-
                     <!-- Recommendations -->
                     ${recsHTML}
+                </div>
+            `;
+        }
+
+        // ── Scan Timing Card ─────────────────────────────────────────
+        function createScanTimingCard(icon, title, data, confidenceClass) {
+            const totalSec = data.total_seconds || data.total_extraction_seconds || 0;
+            const pageLoad = data.page_load_seconds || 0;
+            const extractionSec = data.total_extraction_seconds || 0;
+            const perExtractor = data.per_extractor || {};
+            const slowest = data.slowest_extractor || '';
+            const count = data.extractor_count || 0;
+
+            // Sort extractors by time (slowest first), take top 10
+            const sorted = Object.entries(perExtractor).sort((a, b) => b[1] - a[1]).slice(0, 10);
+            const maxTime = sorted.length ? sorted[0][1] : 1;
+
+            const extractorBars = sorted.map(([name, secs]) => {
+                const pct = Math.min(100, (secs / maxTime) * 100);
+                const color = secs > 3 ? '#ff6b6b' : secs > 1 ? '#ff9f0a' : '#68d68d';
+                return `
+                    <div style="display:flex; align-items:center; gap:6px; padding:2px 0;">
+                        <span style="width:120px; flex-shrink:0; font-size:0.68rem; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</span>
+                        <div style="flex:1; height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
+                            <div style="height:100%; width:${pct}%; background:${color}; border-radius:2px;"></div>
+                        </div>
+                        <span style="width:40px; text-align:right; font-size:0.65rem; color:#ccc; font-family:'SF Mono',monospace;">${secs.toFixed(1)}s</span>
+                    </div>`;
+            }).join('');
+
+            const totalColor = totalSec < 15 ? '#68d68d' : totalSec < 30 ? '#ff9f0a' : '#ff6b6b';
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
+                    </div>
+                    <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
+                </div>
+                <div class="metric-body">
+                    <!-- Total time hero -->
+                    <div style="display:flex; align-items:baseline; gap:0.5rem; margin-bottom:0.5rem;">
+                        <span style="font-size:1.6rem; font-weight:800; color:${totalColor}; font-family:var(--font-display);">${totalSec.toFixed(1)}s</span>
+                        <span style="font-size:0.72rem; color:#888;">total scan time</span>
+                    </div>
+
+                    <!-- Phase breakdown -->
+                    <div style="display:flex; gap:1rem; margin-bottom:0.7rem;">
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.9rem; font-weight:700; color:#7ec8e3; font-family:'SF Mono',monospace;">${pageLoad.toFixed(1)}s</div>
+                            <div style="font-size:0.62rem; color:#888; margin-top:2px;">Page load</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.9rem; font-weight:700; color:#c9b8ff; font-family:'SF Mono',monospace;">${extractionSec.toFixed(1)}s</div>
+                            <div style="font-size:0.62rem; color:#888; margin-top:2px;">Extraction</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.9rem; font-weight:700; color:#ff9f0a; font-family:'SF Mono',monospace;">${count}</div>
+                            <div style="font-size:0.62rem; color:#888; margin-top:2px;">Extractors</div>
+                        </div>
+                    </div>
+
+                    <!-- Per-extractor bars (slowest first) -->
+                    ${extractorBars ? `
+                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
+                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Slowest extractors</div>
+                        ${extractorBars}
+                    </div>` : ''}
+                </div>
+            `;
+        }
+
+        // ── CSS Efficiency Card ──────────────────────────────────────────
+        function createCSSEfficiencyCard(icon, title, data, confidenceClass) {
+            const usedPct = data.used_percentage || 0;
+            const unusedPct = data.unused_percentage || 0;
+            const totalRules = data.total_rules || 0;
+            const usedRules = data.used_rules || 0;
+            const unusedRules = data.unused_rules || 0;
+            const sheetCount = data.stylesheet_count || 0;
+            const inlineSheets = data.inline_stylesheet_count || 0;
+            const importantCount = data.important_count || 0;
+            const label = data.efficiency_label || '';
+
+            const usedColor = usedPct >= 75 ? '#68d68d' : usedPct >= 50 ? '#ff9f0a' : '#ff6b6b';
+
+            // !important severity
+            const impColor = importantCount === 0 ? '#68d68d' : importantCount < 10 ? '#7ec8e3' : importantCount < 50 ? '#ff9f0a' : '#ff6b6b';
+            const impLabel = importantCount === 0 ? 'None — clean!' : importantCount < 10 ? 'Minimal' : importantCount < 50 ? 'Moderate' : 'Heavy use';
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
+                    </div>
+                    <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
+                </div>
+                <div class="metric-body">
+                    <!-- Efficiency hero -->
+                    <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.7rem;">
+                        <div style="flex-shrink:0;">
+                            <div style="font-size:1.6rem; font-weight:800; color:${usedColor}; font-family:var(--font-display); line-height:1;">${usedPct}%</div>
+                            <div style="font-size:0.68rem; color:${usedColor}; margin-top:2px;">CSS used</div>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:0.78rem; color:#ccc; margin-bottom:4px;">${label}</div>
+                            <div style="height:8px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden; display:flex;">
+                                <div style="height:100%; width:${usedPct}%; background:${usedColor}; border-radius:4px 0 0 4px;"></div>
+                                <div style="height:100%; width:${unusedPct}%; background:rgba(255,100,100,0.25);"></div>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; margin-top:3px;">
+                                <span style="font-size:0.62rem; color:${usedColor};">${usedRules} used</span>
+                                <span style="font-size:0.62rem; color:#ff6b6b;">${unusedRules} unused</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats row -->
+                    <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.85rem; font-weight:700; color:#ccc; font-family:'SF Mono',monospace;">${totalRules}</div>
+                            <div style="font-size:0.62rem; color:#888;">CSS rules</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.85rem; font-weight:700; color:#ccc; font-family:'SF Mono',monospace;">${sheetCount + inlineSheets}</div>
+                            <div style="font-size:0.62rem; color:#888;">Stylesheets</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.85rem; font-weight:700; color:${impColor}; font-family:'SF Mono',monospace;">${importantCount}</div>
+                            <div style="font-size:0.62rem; color:#888;">!important</div>
+                        </div>
+                    </div>
+
+                    <!-- !important assessment -->
+                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:0.72rem; color:${impColor};">●</span>
+                            <span style="font-size:0.72rem; color:#999;">!important: <strong style="color:${impColor};">${impLabel}</strong></span>
+                        </div>
+                        ${importantCount > 20 ? `<div style="font-size:0.68rem; color:#ff9f0a; margin-top:4px;">▸ Heavy !important use suggests specificity conflicts</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // ── CSS Specificity Card ─────────────────────────────────────────
+        function createCSSSpecificityCard(icon, title, data, confidenceClass) {
+            const avgSpec = data.average_specificity || [0, 0, 0];
+            const maxSpec = data.max_specificity || [0, 0, 0];
+            const maxSelector = data.max_specificity_selector || '';
+            const dist = data.specificity_distribution || {};
+            const health = data.cascade_health || 'Unknown';
+            const healthDetail = data.cascade_health_detail || '';
+            const methodology = data.methodology || 'Unknown';
+            const totalSel = data.total_selectors || 0;
+            const impCount = data.important_count || 0;
+
+            const healthColors = { Healthy: '#68d68d', Warning: '#ff9f0a', Chaotic: '#ff6b6b', Unknown: '#555' };
+            const healthColor = healthColors[health] || '#555';
+
+            const methColors = { BEM: '#c9b8ff', 'Utility-first': '#7ec8e3', Module: '#f09dff', Semantic: '#68d68d', Mixed: '#ff9f0a', Unknown: '#555' };
+            const methColor = methColors[methodology] || '#888';
+
+            // Distribution bar
+            const low = dist.low_element_only || 0;
+            const med = dist.medium_class_based || 0;
+            const high = dist.high_id_based || 0;
+            const distTotal = low + med + high || 1;
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
+                    </div>
+                    <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
+                </div>
+                <div class="metric-body">
+                    <!-- Health + methodology hero -->
+                    <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.7rem;">
+                        <div style="flex-shrink:0; padding:0.4rem 0.8rem; border-radius:var(--radius-sm); border:2px solid ${healthColor}; background:rgba(255,255,255,0.02);">
+                            <div style="font-size:0.9rem; font-weight:800; color:${healthColor}; font-family:var(--font-display);">${health}</div>
+                            <div style="font-size:0.58rem; color:#666; margin-top:1px;">Cascade</div>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:0.78rem; color:#ccc; margin-bottom:2px;">${healthDetail}</div>
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <span style="font-size:0.68rem; color:${methColor}; font-weight:600;">${methodology}</span>
+                                <span style="font-size:0.62rem; color:#666;">methodology</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Average specificity -->
+                    <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.82rem; font-weight:700; color:#c9b8ff; font-family:'SF Mono',monospace;">(${avgSpec[0]}, ${avgSpec[1]}, ${avgSpec[2]})</div>
+                            <div style="font-size:0.62rem; color:#888;">Average (id, class, element)</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.4rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.82rem; font-weight:700; color:#ccc; font-family:'SF Mono',monospace;">${totalSel}</div>
+                            <div style="font-size:0.62rem; color:#888;">Total selectors</div>
+                        </div>
+                    </div>
+
+                    <!-- Distribution bar -->
+                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-bottom:0.5rem;">
+                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Specificity Distribution</div>
+                        <div style="height:8px; border-radius:4px; overflow:hidden; display:flex; background:rgba(255,255,255,0.05);">
+                            <div style="height:100%; width:${(low/distTotal)*100}%; background:#68d68d;" title="Element selectors: ${low}"></div>
+                            <div style="height:100%; width:${(med/distTotal)*100}%; background:#ff9f0a;" title="Class selectors: ${med}"></div>
+                            <div style="height:100%; width:${(high/distTotal)*100}%; background:#ff6b6b;" title="ID selectors: ${high}"></div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; margin-top:3px;">
+                            <span style="font-size:0.62rem; color:#68d68d;">Element: ${low}</span>
+                            <span style="font-size:0.62rem; color:#ff9f0a;">Class: ${med}</span>
+                            <span style="font-size:0.62rem; color:#ff6b6b;">ID: ${high}</span>
+                        </div>
+                    </div>
+
+                    <!-- Highest specificity selector -->
+                    ${maxSelector ? `
+                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
+                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Highest Specificity</div>
+                        <div style="font-family:'SF Mono',monospace; font-size:0.68rem; color:#c9b8ff; background:rgba(255,255,255,0.04); padding:6px 8px; border-radius:var(--radius-sm); overflow-x:auto; white-space:nowrap;">(${maxSpec.join(',')}) ${maxSelector}</div>
+                    </div>` : ''}
                 </div>
             `;
         }
@@ -9824,8 +10085,11 @@
                 ['Responsive', e.responsive_breakpoints],
                 ['Accessibility', e.accessibility],
                 ['Performance', e.performance],
+                ['CSS Efficiency', e.css_efficiency],
+                ['CSS Specificity', e.css_specificity],
                 ['SEO', e.seo],
                 ['Security', e.security],
+                ['Scan Timing', e.scan_timing],
             ];
             metrics.forEach(([name, data]) => {
                 if (data && data.confidence !== undefined) {
@@ -10016,6 +10280,54 @@
                 md += `- **Score:** ${e.contrast_a11y.score || '?'}/100\n`;
                 md += `- **Violations:** ${ca.total_violations || 0}\n`;
                 md += `- **Passes:** ${ca.total_passes || 0}\n\n`;
+            }
+
+            // --- CSS Efficiency ---
+            if (e.css_efficiency && e.css_efficiency.used_percentage !== undefined) {
+                md += `## CSS Efficiency\n\n`;
+                md += `- **Used:** ${e.css_efficiency.used_percentage}% (${e.css_efficiency.used_rules}/${e.css_efficiency.total_rules} rules)\n`;
+                md += `- **Unused:** ${e.css_efficiency.unused_percentage}%\n`;
+                md += `- **Stylesheets:** ${e.css_efficiency.stylesheet_count || 0}\n`;
+                md += `- **!important count:** ${e.css_efficiency.important_count || 0}\n`;
+                md += `- **Assessment:** ${e.css_efficiency.efficiency_label || ''}\n\n`;
+            }
+
+            // --- CSS Specificity ---
+            if (e.css_specificity && e.css_specificity.cascade_health) {
+                md += `## CSS Specificity\n\n`;
+                md += `- **Cascade Health:** ${e.css_specificity.cascade_health}\n`;
+                md += `- **Methodology:** ${e.css_specificity.methodology || 'Unknown'}\n`;
+                md += `- **Average Specificity:** (${(e.css_specificity.average_specificity || []).join(', ')})\n`;
+                md += `- **Max Specificity:** (${(e.css_specificity.max_specificity || []).join(', ')}) — \`${e.css_specificity.max_specificity_selector || ''}\`\n`;
+                md += `- **Total Selectors:** ${e.css_specificity.total_selectors || 0}\n`;
+                const sd = e.css_specificity.specificity_distribution || {};
+                md += `- **Distribution:** Element: ${sd.low_element_only || 0}, Class: ${sd.medium_class_based || 0}, ID: ${sd.high_id_based || 0}\n\n`;
+            }
+
+            // --- Security (detailed) ---
+            if (e.security && e.security.checks) {
+                md += `## Security\n\n`;
+                md += `- **Grade:** ${e.security.grade || '?'} (${e.security.score || 0}/100)\n`;
+                const checkLabels = {
+                    https: 'HTTPS', hsts: 'HSTS', csp: 'CSP', x_frame_options: 'X-Frame-Options',
+                    x_content_type_options: 'X-Content-Type-Options', referrer_policy: 'Referrer-Policy',
+                    permissions_policy: 'Permissions-Policy', sri: 'SRI', no_mixed_content: 'No Mixed Content',
+                    secure_cookies: 'Secure Cookies', cors_policy: 'CORS', security_txt: 'security.txt'
+                };
+                Object.entries(e.security.checks).forEach(([k, v]) => {
+                    md += `- ${v.pass ? '✓' : '✗'} **${checkLabels[k] || k}** (${v.points}/${v.max})\n`;
+                });
+                md += `\n`;
+            }
+
+            // --- Scan Timing ---
+            if (e.scan_timing) {
+                md += `## Scan Timing\n\n`;
+                md += `- **Total:** ${e.scan_timing.total_seconds || e.scan_timing.total_extraction_seconds || 0}s\n`;
+                if (e.scan_timing.page_load_seconds) md += `- **Page Load:** ${e.scan_timing.page_load_seconds}s\n`;
+                md += `- **Extraction:** ${e.scan_timing.total_extraction_seconds || 0}s\n`;
+                md += `- **Slowest:** ${e.scan_timing.slowest_extractor || '?'} (${e.scan_timing.slowest_seconds || 0}s)\n`;
+                md += `- **Extractors Run:** ${e.scan_timing.extractor_count || 0}\n\n`;
             }
 
             md += `---\n*Generated by Web Intelligence Scraper*\n`;
