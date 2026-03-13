@@ -165,7 +165,8 @@ def deep_scan():
         print(f" 📊 Mode: {analysis_mode}")
         print('='*70)
 
-        engine = DeepEvidenceEngine(site_url, analysis_mode=analysis_mode)
+        discovery_method = data.get('discovery_method', 'auto')
+        engine = DeepEvidenceEngine(site_url, analysis_mode=analysis_mode, discovery_method=discovery_method)
         evidence = run_async(engine.extract_all())
 
         print("\n✅ Deep scan complete!")
@@ -392,20 +393,99 @@ def cloudflare_crawl():
             timeout=300
         ))
 
-        return jsonify({
+        response = {
             'success': True,
             'crawl_id': result.get('crawl_id', ''),
             'status': result.get('status', 'unknown'),
             'pages': result.get('pages', [])[:50],  # Cap response size
             'urls': result.get('urls', []),
             'total': result.get('total', 0)
-        })
+        }
+
+        # Optional topology analysis on crawled URLs
+        if data.get('analyze_topology', False) and result.get('urls'):
+            from site_topology import SiteTopologyAnalyzer
+            topo = SiteTopologyAnalyzer()
+            response['topology'] = topo.analyze(result['urls'], site_url, url_source='cloudflare')
+
+        return jsonify(response)
 
     except CloudflareNotConfigured as e:
         return jsonify({'error': str(e), 'available': False}), 503
     except Exception as e:
         logger.error(f"Cloudflare crawl failed: {e}", exc_info=True)
         return jsonify({'error': f'Cloudflare crawl failed: {str(e)[:200]}'}), 500
+
+
+@app.route('/api/site-topology', methods=['POST'])
+def site_topology():
+    """
+    Analyze site topology from discovered URLs.
+
+    Request body:
+    {
+        "site_url": "https://stripe.com",
+        "urls": [...],              // Optional: pre-discovered URL list
+        "discovery_method": "auto"  // 'auto' | 'cloudflare' | 'nav'
+    }
+
+    If urls not provided, discovers them first via nav scraping
+    (or Cloudflare if configured and discovery_method allows).
+    """
+    data = request.json
+    site_url = data.get('site_url')
+    if not site_url:
+        return jsonify({'error': 'site_url required'}), 400
+
+    site_url, url_error = validate_url(site_url)
+    if url_error:
+        return jsonify({'error': url_error}), 400
+
+    # Use pre-supplied URLs or discover them
+    urls = data.get('urls', [])
+    url_source = 'provided'
+
+    if not urls:
+        discovery_method = data.get('discovery_method', 'auto')
+
+        # Try Cloudflare first
+        if discovery_method in ('cloudflare', 'auto'):
+            try:
+                from cloudflare_crawl import CloudflareCrawler, is_cloudflare_available
+                if is_cloudflare_available():
+                    crawler = CloudflareCrawler()
+                    urls = run_async(crawler.discover_urls(site_url, limit=100, depth=3))
+                    url_source = 'cloudflare'
+            except Exception as e:
+                logger.warning(f"Cloudflare topology discovery failed: {e}")
+
+        # Fall back to nav scraping
+        if not urls:
+            try:
+                engine = DeepEvidenceEngine(site_url, analysis_mode='single')
+                result = run_async(engine._quick_discover(site_url))
+                urls = result if isinstance(result, list) else result.get('all', [])
+                url_source = 'nav_discovery'
+            except Exception as e:
+                return jsonify({'error': f'URL discovery failed: {str(e)[:200]}'}), 500
+
+    if len(urls) < 3:
+        return jsonify({
+            'success': False,
+            'error': f'Only {len(urls)} URLs found — need at least 3 for topology',
+            'urls_found': len(urls)
+        }), 400
+
+    from site_topology import SiteTopologyAnalyzer
+    topo = SiteTopologyAnalyzer()
+    topology = topo.analyze(urls, site_url, url_source=url_source)
+
+    return jsonify({
+        'success': True,
+        'topology': topology,
+        'urls_analyzed': len(urls),
+        'url_source': url_source
+    })
 
 
 @app.route('/api/discover-urls', methods=['POST'])

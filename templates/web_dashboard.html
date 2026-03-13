@@ -3906,6 +3906,7 @@
 
                     const diagramId = 'mermaid-site-structure-' + Date.now();
                     const urlPatternId = 'mermaid-url-patterns-' + Date.now();
+                    const topoId = 'mermaid-topology-' + Date.now();
 
                     let urlPatternSection = '';
                     if (diagrams.url_patterns) {
@@ -3913,6 +3914,15 @@
                             '<div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">' +
                                 '<div style="font-size:0.78rem; font-weight:600; color:#aaa; margin-bottom:8px;">URL Pattern Map</div>' +
                                 '<div class="mermaid-container" id="' + urlPatternId + '"></div>' +
+                            '</div>';
+                    }
+
+                    let topoSection = '';
+                    if (diagrams.site_topology) {
+                        topoSection =
+                            '<div style="margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">' +
+                                '<div style="font-size:0.78rem; font-weight:600; color:#aaa; margin-bottom:8px;">Site Topology</div>' +
+                                '<div class="mermaid-container" id="' + topoId + '"></div>' +
                             '</div>';
                     }
 
@@ -3932,6 +3942,7 @@
                         '<div class="metric-body">' +
                             '<div class="mermaid-container" id="' + diagramId + '" style="background:#0d1117; border-radius:8px; padding:16px; overflow-x:auto;"></div>' +
                             urlPatternSection +
+                            topoSection +
                             '<div class="mermaid-source" style="display:none; margin-top:12px;">' +
                                 '<pre style="background:#161b22; padding:12px; border-radius:6px; font-size:0.72rem; color:#8b949e; overflow-x:auto; white-space:pre-wrap;">' +
                                     diagrams.site_structure.replace(/</g, '&lt;').replace(/>/g, '&gt;') +
@@ -3959,6 +3970,16 @@
                                         patEl.innerHTML = result.svg;
                                     }).catch(function(err) {
                                         patEl.innerHTML = '<pre style="color:#f85149; font-size:0.72rem;">' + err.message + '</pre>';
+                                    });
+                                }
+                            }
+                            if (diagrams.site_topology) {
+                                const topoEl = document.getElementById(topoId);
+                                if (topoEl && typeof mermaid !== 'undefined') {
+                                    mermaid.render('mermaid-render-topo-' + Date.now(), diagrams.site_topology).then(function(result) {
+                                        topoEl.innerHTML = result.svg;
+                                    }).catch(function(err) {
+                                        topoEl.innerHTML = '<pre style="color:#f85149; font-size:0.72rem;">' + err.message + '</pre>';
                                     });
                                 }
                             }
@@ -4146,7 +4167,8 @@
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
                         { key: 'z_index_stack', icon: '📚', title: 'Z-Index Stack' },
                         { key: 'dom_depth', icon: '🌳', title: 'DOM Depth' },
-                        { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' }
+                        { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' },
+                        { key: 'site_topology', icon: '🗺️', title: 'Site Topology' }
                     ]
                 },
                 {
@@ -4876,7 +4898,8 @@
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
                         { key: 'z_index_stack', icon: '📚', title: 'Z-Index Stack' },
                         { key: 'dom_depth', icon: '🌳', title: 'DOM Depth' },
-                        { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' }
+                        { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' },
+                        { key: 'site_topology', icon: '🗺️', title: 'Site Topology' }
                     ]
                 },
                 {
@@ -5338,6 +5361,8 @@
                 bodyHTML = createCSSEfficiencyCard(icon, title, data, confidenceClass);
             } else if (title === 'CSS Specificity') {
                 bodyHTML = createCSSSpecificityCard(icon, title, data, confidenceClass);
+            } else if (title === 'Site Topology') {
+                bodyHTML = createSiteTopologyCard(icon, title, data, confidenceClass);
             } else {
                 bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
             }
@@ -5525,6 +5550,8 @@
                     return safeDisplayValue(data.pattern);
                 }
                 case 'Token Taxonomy':
+                    return safeDisplayValue(data.pattern);
+                case 'Site Topology':
                     return safeDisplayValue(data.pattern);
                 default:
                     return safeDisplayValue(data.pattern);
@@ -7922,6 +7949,145 @@
             `;
         }
 
+        // ── Site Topology Card ──────────────────────────────────────────
+        function createSiteTopologyCard(icon, title, data, confidenceClass) {
+            const sections = data.sections || [];
+            const hierarchy = data.hierarchy || {};
+            const urlPatterns = data.url_patterns || [];
+            const contentDist = data.content_distribution || {};
+            const totalPages = data.total_pages || 0;
+            const urlSource = data.url_source || 'unknown';
+
+            const shape = hierarchy.shape || 'balanced';
+            const shapeLabel = hierarchy.label || 'Balanced hierarchy';
+            const maxDepth = hierarchy.max_depth || 0;
+            const avgDepth = hierarchy.avg_depth || 0;
+
+            // Shape icon/color
+            const shapeStyles = {
+                'wide-shallow': { icon: '↔️', color: '#7ec8e3' },
+                'deep-narrow': { icon: '↕️', color: '#c9b8ff' },
+                'deep': { icon: '⬇️', color: '#a78bfa' },
+                'wide': { icon: '↔️', color: '#68d68d' },
+                'balanced': { icon: '⬛', color: '#f0a050' }
+            };
+            const shapeStyle = shapeStyles[shape] || shapeStyles['balanced'];
+
+            // Content type colors
+            const typeColors = {
+                documentation: '#7ec8e3',
+                blog: '#c9b8ff',
+                product: '#68d68d',
+                developer: '#6c9eff',
+                corporate: '#ff9f0a',
+                community: '#f09dff',
+                media: '#ff8fa3',
+                other: '#666'
+            };
+
+            // Section bars (sorted by page count, max 8)
+            const maxPages = sections.length ? Math.max(...sections.map(s => s.page_count)) : 1;
+            const sectionBars = sections.slice(0, 8).map(function(s) {
+                const pct = Math.min(100, (s.page_count / maxPages) * 100);
+                const color = typeColors[s.type] || '#666';
+                const typeLabel = s.type !== 'other' ? s.type : '';
+                return `
+                    <div style="display:flex; align-items:center; gap:6px; padding:2px 0;">
+                        <span style="width:80px; flex-shrink:0; font-size:0.68rem; color:#ccc; font-family:'SF Mono',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s.path}</span>
+                        <div style="flex:1; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                            <div style="height:100%; width:${pct}%; background:${color}; border-radius:3px;"></div>
+                        </div>
+                        <span style="width:28px; text-align:right; font-size:0.62rem; color:#aaa; font-family:'SF Mono',monospace;">${s.page_count}</span>
+                        ${typeLabel ? `<span style="font-size:0.56rem; color:${color}; background:${color}18; padding:1px 5px; border-radius:8px; white-space:nowrap;">${typeLabel}</span>` : ''}
+                    </div>`;
+            }).join('');
+
+            // Content distribution bar
+            const distEntries = Object.entries(contentDist);
+            const totalDistPages = distEntries.reduce((sum, [, v]) => sum + (v.count || 0), 0) || 1;
+            const distBar = distEntries.length > 0 ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-top:0.5rem;">
+                    <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Content Distribution</div>
+                    <div style="height:8px; border-radius:4px; overflow:hidden; display:flex; background:rgba(255,255,255,0.05);">
+                        ${distEntries.map(([type, info]) => {
+                            const w = ((info.count || 0) / totalDistPages) * 100;
+                            const c = typeColors[type] || '#666';
+                            return `<div style="height:100%; width:${w}%; background:${c};" title="${type}: ${info.count} pages (${info.pct || 0}%)"></div>`;
+                        }).join('')}
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">
+                        ${distEntries.map(([type, info]) => {
+                            const c = typeColors[type] || '#666';
+                            return `<span style="font-size:0.58rem; color:${c};">${type} ${info.pct || 0}%</span>`;
+                        }).join('')}
+                    </div>
+                </div>` : '';
+
+            // URL patterns list (top 5)
+            const patternsHTML = urlPatterns.length > 0 ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem; margin-top:0.5rem;">
+                    <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">URL Templates</div>
+                    ${urlPatterns.slice(0, 5).map(function(p) {
+                        return `<div style="display:flex; align-items:center; gap:6px; padding:2px 0;">
+                            <span style="flex:1; font-size:0.66rem; color:#c9b8ff; font-family:'SF Mono',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${(p.template || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+                            <span style="font-size:0.6rem; color:#888; flex-shrink:0;">${p.count} pages</span>
+                        </div>`;
+                    }).join('')}
+                </div>` : '';
+
+            // Source badge
+            const sourceLabels = { cloudflare: 'Cloudflare Crawl', nav_discovery: 'Nav Discovery', interactive: 'Interactive' };
+            const sourceLabel = sourceLabels[urlSource] || urlSource;
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
+                    </div>
+                    <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
+                </div>
+                <div class="metric-body">
+                    <!-- Hero stat -->
+                    <div style="display:flex; align-items:baseline; gap:0.5rem; margin-bottom:0.5rem;">
+                        <span style="font-size:1.6rem; font-weight:800; color:#7ec8e3; font-family:var(--font-display);">${totalPages}</span>
+                        <span style="font-size:0.72rem; color:#888;">pages across ${sections.length} section${sections.length !== 1 ? 's' : ''}</span>
+                    </div>
+
+                    <!-- Hierarchy stats -->
+                    <div style="display:flex; gap:0.6rem; margin-bottom:0.7rem;">
+                        <div style="flex:1; text-align:center; padding:0.35rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.85rem; font-weight:700; color:${shapeStyle.color}; font-family:var(--font-display);">${shapeStyle.icon} ${shape.replace('-', ' ')}</div>
+                            <div style="font-size:0.56rem; color:#777; margin-top:1px;">Shape</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.35rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.85rem; font-weight:700; color:#c9b8ff; font-family:'SF Mono',monospace;">${maxDepth}</div>
+                            <div style="font-size:0.56rem; color:#777; margin-top:1px;">Max depth</div>
+                        </div>
+                        <div style="flex:1; text-align:center; padding:0.35rem; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm);">
+                            <div style="font-size:0.85rem; font-weight:700; color:#ff9f0a; font-family:'SF Mono',monospace;">${avgDepth}</div>
+                            <div style="font-size:0.56rem; color:#777; margin-top:1px;">Avg depth</div>
+                        </div>
+                    </div>
+
+                    <!-- Section breakdown bars -->
+                    ${sections.length > 0 ? `
+                    <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
+                        <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Sections</div>
+                        ${sectionBars}
+                    </div>` : ''}
+
+                    ${distBar}
+                    ${patternsHTML}
+
+                    <!-- Source badge -->
+                    <div style="margin-top:0.5rem; text-align:right;">
+                        <span style="font-size:0.56rem; color:#555; background:rgba(255,255,255,0.04); padding:2px 6px; border-radius:4px;">via ${sourceLabel}</span>
+                    </div>
+                </div>
+            `;
+        }
+
         // ── Third-Party Card ──────────────────────────────────────────
         function createThirdPartyCard(icon, title, data, confidenceClass) {
             const details = data.details || {};
@@ -10090,6 +10256,7 @@
                 ['SEO', e.seo],
                 ['Security', e.security],
                 ['Scan Timing', e.scan_timing],
+                ['Site Topology', e.site_topology],
             ];
             metrics.forEach(([name, data]) => {
                 if (data && data.confidence !== undefined) {
@@ -10328,6 +10495,33 @@
                 md += `- **Extraction:** ${e.scan_timing.total_extraction_seconds || 0}s\n`;
                 md += `- **Slowest:** ${e.scan_timing.slowest_extractor || '?'} (${e.scan_timing.slowest_seconds || 0}s)\n`;
                 md += `- **Extractors Run:** ${e.scan_timing.extractor_count || 0}\n\n`;
+            }
+
+            // --- Site Topology ---
+            if (e.site_topology && e.site_topology.sections) {
+                md += `## Site Topology\n\n`;
+                md += `- **Total Pages:** ${e.site_topology.total_pages || 0}\n`;
+                md += `- **Sections:** ${(e.site_topology.sections || []).length}\n`;
+                const h = e.site_topology.hierarchy || {};
+                md += `- **Max Depth:** ${h.max_depth || 0}\n`;
+                md += `- **Avg Depth:** ${h.avg_depth || 0}\n`;
+                md += `- **Shape:** ${h.label || h.shape || 'unknown'}\n`;
+                md += `- **Source:** ${e.site_topology.url_source || 'unknown'}\n\n`;
+                if (e.site_topology.sections.length > 0) {
+                    md += `### Sections\n\n`;
+                    md += `| Path | Pages | Depth | Type |\n|------|-------|-------|------|\n`;
+                    e.site_topology.sections.forEach(s => {
+                        md += `| ${s.path} | ${s.page_count} | ${s.depth} | ${s.type || 'other'} |\n`;
+                    });
+                    md += `\n`;
+                }
+                if (e.site_topology.url_patterns && e.site_topology.url_patterns.length > 0) {
+                    md += `### URL Templates\n\n`;
+                    e.site_topology.url_patterns.forEach(p => {
+                        md += `- \`${p.template}\` (${p.count} pages)\n`;
+                    });
+                    md += `\n`;
+                }
             }
 
             md += `---\n*Generated by Web Intelligence Scraper*\n`;

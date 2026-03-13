@@ -91,14 +91,16 @@ class DeepEvidenceEngine:
     - 'smart-nav': Analyze home + 2 nav links (comprehensive, 3-4min)
     """
 
-    def __init__(self, url: str, analysis_mode: str = 'single'):
+    def __init__(self, url: str, analysis_mode: str = 'single', discovery_method: str = 'auto'):
         """
         Args:
             url: Starting URL to analyze
             analysis_mode: 'single' or 'smart-nav'
+            discovery_method: 'auto' | 'cloudflare' | 'nav' — URL discovery source
         """
         self.url = url
         self.analysis_mode = analysis_mode
+        self.discovery_method = discovery_method
         self.evidence = {}
 
     def _add_statistical_fields(self, evidence: Dict, sample_size: int = None,
@@ -567,6 +569,9 @@ class DeepEvidenceEngine:
         Discovers nav links (with optional lightweight interactive discovery),
         then selects the 3 most diverse pages by URL path structure.
 
+        When Cloudflare is available and discovery_method permits, uses crawl
+        data for a richer URL pool before falling through to nav discovery.
+
         Returns:
             {
                 'home': 'https://site.com',
@@ -574,6 +579,24 @@ class DeepEvidenceEngine:
                 'nav_2': 'https://site.com/docs'
             }
         """
+        # ── Try Cloudflare discovery first (if configured) ──
+        if self.discovery_method in ('cloudflare', 'auto'):
+            cf_urls = await self._discover_via_cloudflare(base_url, limit=50)
+            if cf_urls and len(cf_urls) > 5:
+                print(f"   ☁️  Cloudflare discovered {len(cf_urls)} URLs")
+                selected = self._select_diverse_pages(cf_urls, base_url, max_pages=3)
+                result = {'home': base_url}
+                for key, url in selected.items():
+                    if key == 'home':
+                        continue
+                    result[f'nav_{len(result)}'] = url
+                for label, url in result.items():
+                    if label != 'home':
+                        print(f"   📍 {label}: {url}")
+                # Store crawled URLs for topology analysis later
+                self._cloudflare_urls = cf_urls
+                return result
+
         print("   🧭 Discovering navigation structure...")
 
         # Load home page
@@ -646,6 +669,45 @@ class DeepEvidenceEngine:
                 print(f"   📍 {label}: {url}")
 
         return result
+
+    async def _quick_discover(self, url: str) -> List[str]:
+        """
+        Lightweight URL discovery: open page, scrape all links, return list.
+        Used by /api/site-topology when no URLs are pre-supplied.
+        """
+        from patchright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            try:
+                await page.goto(url, wait_until='domcontentloaded', timeout=20000)
+                await asyncio.sleep(2)
+                links = await self._discover_links(page, url)
+                raw_all = links.get('all', []) if isinstance(links, dict) else []
+                # _discover_links().all contains {url, text, path} objects — extract URLs
+                result = []
+                for item in raw_all:
+                    if isinstance(item, dict):
+                        result.append(item.get('url', ''))
+                    elif isinstance(item, str):
+                        result.append(item)
+                return [u for u in result if u]
+            finally:
+                await browser.close()
+
+    async def _discover_via_cloudflare(self, url: str, limit: int = 50) -> List[str]:
+        """Try Cloudflare crawl for URL discovery; returns [] if unavailable."""
+        try:
+            from cloudflare_crawl import CloudflareCrawler, is_cloudflare_available
+            if not is_cloudflare_available():
+                return []
+            print("   ☁️  Attempting Cloudflare URL discovery...")
+            crawler = CloudflareCrawler()
+            urls = await crawler.discover_urls(url, limit=limit, depth=2)
+            return urls or []
+        except Exception as e:
+            print(f"   ⚠️  Cloudflare discovery unavailable: {str(e)[:100]}")
+            return []
 
     async def multi_scan(self, urls: List[str], analysis_focus: str = 'full') -> Dict:
         """
@@ -931,6 +993,32 @@ class DeepEvidenceEngine:
         print("\n🔗 Discovering navigation links...")
         discovered_links = await self._discover_links(page, url)
 
+        # ── Site Topology (information architecture from discovered URLs) ──
+        # _discover_links().all contains objects {url, text, path} — extract URL strings
+        _raw_all = discovered_links.get('all', []) if isinstance(discovered_links, dict) else []
+        all_discovered = []
+        for item in _raw_all:
+            if isinstance(item, dict):
+                all_discovered.append(item.get('url', ''))
+            elif isinstance(item, str):
+                all_discovered.append(item)
+        all_discovered = [u for u in all_discovered if u]
+        # Include any Cloudflare-discovered URLs if available
+        if hasattr(self, '_cloudflare_urls') and self._cloudflare_urls:
+            all_discovered = list(set(all_discovered + self._cloudflare_urls))
+            _topo_source = 'cloudflare'
+        else:
+            _topo_source = 'nav_discovery'
+
+        if len(all_discovered) >= 5:
+            from site_topology import SiteTopologyAnalyzer
+            print(f"\n🗺️  Analyzing site topology ({len(all_discovered)} URLs)...")
+            _topo_analyzer = SiteTopologyAnalyzer()
+            evidence['site_topology'] = await safe_extract(
+                'Site Topology',
+                lambda: _topo_analyzer.analyze(all_discovered, url, url_source=_topo_source)
+            )
+
         # Meta info
         try:
             total_nodes = await page.evaluate('document.querySelectorAll("*").length')
@@ -1158,6 +1246,42 @@ class DeepEvidenceEngine:
         # Also surface the first page's site_architecture details for the ERD row
         first_page = next(iter(valid_pages.values()), {})
         synthesis['site_architecture'] = first_page.get('site_architecture', {})
+
+        # ── Site Topology (cross-page URL analysis) ──
+        # Collect all discovered URLs across every analyzed page
+        all_cross_urls = set()
+        for label, result in page_results.items():
+            if result.get('error'):
+                continue
+            url_pats = result.get('url_patterns', {})
+            details = url_pats.get('details', {}) if isinstance(url_pats, dict) else {}
+            all_links = details.get('all', []) if isinstance(details, dict) else []
+            all_cross_urls.update(all_links)
+            meta_url = (result.get('meta_info') or {}).get('url', '')
+            if meta_url:
+                all_cross_urls.add(meta_url)
+
+        # Include any per-page topology data (each page may have nav-discovered URLs)
+        for label, result in page_results.items():
+            topo = result.get('site_topology')
+            if topo and isinstance(topo, dict):
+                # Merge sections count for richer data
+                pass  # Individual topologies are per-page; cross-page is richer
+
+        # Include Cloudflare URLs if they were captured during discovery
+        if hasattr(self, '_cloudflare_urls') and self._cloudflare_urls:
+            all_cross_urls.update(self._cloudflare_urls)
+            _topo_source = 'cloudflare'
+        else:
+            _topo_source = 'multi_page'
+
+        base_url = page_results.get('home', {}).get('meta_info', {}).get('url', self.url)
+        if len(all_cross_urls) >= 5:
+            from site_topology import SiteTopologyAnalyzer
+            topo = SiteTopologyAnalyzer()
+            synthesis['site_topology'] = topo.analyze(
+                list(all_cross_urls), base_url, url_source=_topo_source
+            )
 
         return synthesis
 
@@ -4235,6 +4359,42 @@ class DeepEvidenceEngine:
         result = {'site_structure': site_structure}
         if url_patterns_mermaid:
             result['url_patterns'] = url_patterns_mermaid
+
+        # ── Site Topology Diagram (from site_topology evidence) ──
+        topo = evidence.get('site_topology')
+        if topo and isinstance(topo, dict) and topo.get('sections'):
+            content_type_colors = {
+                'documentation': '#1a73e8',
+                'blog': '#10b981',
+                'product': '#f59e0b',
+                'developer': '#8b5cf6',
+                'corporate': '#6b7280',
+                'community': '#06b6d4',
+                'media': '#ec4899',
+                'other': '#64748b',
+            }
+            topo_lines = ['graph TD']
+            topo_lines.append(f'    ROOT["{esc(domain)}"]')
+            topo_lines.append(f'    style ROOT fill:#1e293b,stroke:#7c3aed,color:#fff')
+
+            for section in topo['sections'][:10]:
+                n = nid()
+                s_path = section.get('path', '/')
+                s_count = section.get('page_count', 0)
+                s_type = section.get('type', 'other')
+                label = f"{esc(s_path)} ({s_count} pages)"
+                color = content_type_colors.get(s_type, '#64748b')
+                topo_lines.append(f'    ROOT --> {n}["{label}"]')
+                topo_lines.append(f'    style {n} fill:{color},stroke:#fff,color:#fff')
+
+                # Show templates as children
+                tmpl = section.get('template')
+                if tmpl:
+                    tn = nid()
+                    topo_lines.append(f'    {n} -.-> {tn}["{esc(tmpl)}"]')
+                    topo_lines.append(f'    style {tn} fill:#0f172a,stroke:#475569,color:#94a3b8')
+
+            result['site_topology'] = '\n'.join(topo_lines)
 
         return result
 

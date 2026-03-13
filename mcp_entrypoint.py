@@ -265,5 +265,50 @@ async def cloudflare_crawl(url: str, limit: int = 10, depth: int = 2) -> dict:
         return {'error': f'Cloudflare crawl failed: {str(e)[:200]}'}
 
 
+@mcp.tool()
+async def site_topology(url: str, discovery_method: str = 'auto') -> dict:
+    """
+    Analyze the topology of a website: sections, hierarchy, URL patterns,
+    and content distribution.
+
+    Args:
+        url: The website URL to analyze
+        discovery_method: 'auto' | 'cloudflare' | 'nav'
+
+    Returns topology with sections, hierarchy depth, URL templates,
+    and content type distribution.
+    """
+    urls = []
+    url_source = 'nav_discovery'
+
+    # Try Cloudflare first
+    if discovery_method in ('cloudflare', 'auto'):
+        try:
+            from cloudflare_crawl import CloudflareCrawler, is_cloudflare_available
+            if is_cloudflare_available():
+                crawler = CloudflareCrawler()
+                urls = await crawler.discover_urls(url, limit=100, depth=3)
+                url_source = 'cloudflare'
+        except Exception:
+            pass
+
+    # Fallback to nav scraping
+    if not urls:
+        try:
+            engine = DeepEvidenceEngine(url, analysis_mode='single')
+            urls = await engine._quick_discover(url)
+            url_source = 'nav_discovery'
+        except Exception as e:
+            return {'error': f'URL discovery failed: {str(e)[:200]}'}
+
+    if len(urls) < 3:
+        return {'error': f'Only {len(urls)} URLs found — need at least 3', 'urls_found': len(urls)}
+
+    from site_topology import SiteTopologyAnalyzer
+    topo = SiteTopologyAnalyzer()
+    result = topo.analyze(urls, url, url_source=url_source)
+    return _clean_for_mcp(result)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
