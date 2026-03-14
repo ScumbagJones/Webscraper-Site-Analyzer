@@ -723,6 +723,24 @@
                 </p>
             </div>
 
+            <!-- Advanced options — visible in targeted mode -->
+            <div id="advancedOptions" style="display:none; margin-bottom:1rem;">
+                <div style="display:flex; gap:1.5rem; align-items:center; padding:0.75rem 1rem; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                    <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-size:0.85rem; color:#aaa;">
+                        <input type="checkbox" id="includeStates" style="accent-color:#0a84ff;">
+                        <span>⚡ Capture hover/focus states</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-size:0.85rem; color:#aaa;">
+                        <input type="checkbox" id="figmaOutput" style="accent-color:#a259ff;">
+                        <span style="color:#c9b8ff;">◆ Figma-ready output</span>
+                    </label>
+                    <button onclick="findAcrossSite()" id="crossSiteBtn"
+                            style="margin-left:auto; background:rgba(104,214,141,0.12); border:1px solid rgba(104,214,141,0.3); color:#68d68d; font-size:0.78rem; padding:5px 14px; border-radius:6px; cursor:pointer; font-weight:600;">
+                        🌐 Find Across Site
+                    </button>
+                </div>
+            </div>
+
             <button class="btn btn-primary" onclick="ripComponent()" id="ripBtn">
                 Extract Blueprint
             </button>
@@ -770,6 +788,7 @@
 
             const selectorGroup = document.getElementById('selectorGroup');
             const computedHint = document.getElementById('computedHint');
+            const advancedOptions = document.getElementById('advancedOptions');
 
             if (mode === 'targeted' || mode === 'computed') {
                 selectorGroup.style.display = 'block';
@@ -778,6 +797,7 @@
             }
 
             computedHint.style.display = mode === 'computed' ? 'block' : 'none';
+            advancedOptions.style.display = mode === 'targeted' ? 'block' : 'none';
         }
 
         const examples = {
@@ -828,12 +848,17 @@
             ripBtn.textContent = 'Ripping...';
 
             try {
+                const includeStates = document.getElementById('includeStates').checked;
+                const figmaOutput = document.getElementById('figmaOutput').checked;
+
                 const response = await fetch('/api/rip-component', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         site_url: url,
-                        selector: selector
+                        selector: selector,
+                        include_states: includeStates,
+                        output_format: figmaOutput ? 'figma' : 'json'
                     })
                 });
 
@@ -1191,8 +1216,55 @@
                 }
             }
 
+            // Interactive States
+            if (data.interactive_states && data.interactive_states.states_detected > 0) {
+                const states = data.interactive_states;
+                html += `<div style="margin-top:1.5rem; padding:1rem; background:rgba(10,132,255,0.06); border-radius:8px; border-left:3px solid #0a84ff;">`;
+                html += `<h4 style="margin:0 0 0.75rem; color:#0a84ff; font-size:0.9rem;">⚡ Interactive States (${states.states_detected} detected)</h4>`;
+
+                const renderDelta = (label, delta, color) => {
+                    if (!delta || Object.keys(delta).length === 0) return '';
+                    let s = '<div style="margin-bottom:0.5rem;"><span style="font-size:0.75rem; font-weight:600; color:' + color + ';">' + label + '</span>';
+                    s += '<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:3px;">';
+                    for (const [prop, vals] of Object.entries(delta)) {
+                        s += '<span style="font-size:0.7rem; background:rgba(255,255,255,0.06); padding:2px 8px; border-radius:4px; color:#ccc; font-family:\'SF Mono\',monospace;">' + prop + ': ' + (vals.to || vals) + '</span>';
+                    }
+                    s += '</div></div>';
+                    return s;
+                };
+
+                if (states.root) {
+                    html += renderDelta('Root :hover', states.root.hover_delta, '#ff9f0a');
+                    html += renderDelta('Root :focus', states.root.focus_delta, '#0a84ff');
+                }
+                if (states.children && states.children.length > 0) {
+                    states.children.slice(0, 5).forEach(c => {
+                        const tag = c.tag || 'element';
+                        const sel = c.selector || tag;
+                        html += renderDelta(sel + ' :hover', c.hover_delta, '#ff9f0a');
+                    });
+                }
+                html += `</div>`;
+            }
+
+            // Figma-ready Markdown
+            if (data.figma_markdown) {
+                html += `
+                    <div class="code-block" style="margin-top:1rem; border-color:rgba(162,89,255,0.3);">
+                        <div class="code-header" style="background:rgba(162,89,255,0.1);">
+                            <span class="code-label" style="color:#c9b8ff;">◆ Figma-Ready Output</span>
+                            <button class="copy-btn" onclick="copyCode(this, \`${escapeCode(data.figma_markdown)}\`)" style="color:#c9b8ff; border-color:rgba(162,89,255,0.3);">Copy</button>
+                        </div>
+                        <div class="code-content" style="white-space:pre-wrap; font-size:0.78rem; max-height:400px; overflow-y:auto;">${data.figma_markdown.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    </div>
+                `;
+            }
+
             // Download buttons
             html += `<div class="download-bar">`;
+            if (data.figma_markdown) {
+                html += `<button class="btn-download btn-download-secondary" onclick="downloadFigma('${name}', ${JSON.stringify(JSON.stringify(data.figma_markdown))})" style="background:rgba(162,89,255,0.1); border-color:rgba(162,89,255,0.3); color:#c9b8ff;">Download Figma Markdown</button>`;
+            }
             if (data.markdown) {
                 html += `<button class="btn-download btn-download-secondary" onclick="downloadMarkdown('${name}', ${JSON.stringify(JSON.stringify(data.markdown))})">Download Markdown Docs</button>`;
             }
@@ -1227,6 +1299,115 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        function downloadFigma(name, markdownStr) {
+            const markdown = JSON.parse(markdownStr);
+            const blob = new Blob([markdown], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${name.toLowerCase()}-figma.md`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function findAcrossSite() {
+            const url = document.getElementById('urlInput').value;
+            const selector = document.getElementById('selectorInput').value;
+            if (!url) { alert('Enter a URL first'); return; }
+            if (!selector) { alert('Enter a CSS selector to search for across the site'); return; }
+
+            const btn = document.getElementById('crossSiteBtn');
+            btn.disabled = true;
+            btn.textContent = '🌐 Crawling...';
+
+            try {
+                const response = await fetch('/api/rip-component/cross-site', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ site_url: url, selector: selector })
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                displayCrossSiteResults(data, selector);
+
+            } catch (error) {
+                alert('Cross-site search failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🌐 Find Across Site';
+            }
+        }
+
+        function displayCrossSiteResults(data, selector) {
+            const container = document.getElementById('results');
+            container.classList.add('active');
+
+            const card = document.createElement('div');
+            card.className = 'blueprint-card';
+            card.style.borderColor = 'rgba(104,214,141,0.3)';
+
+            const found = data.found_on || 0;
+            const total = data.total_pages || 0;
+            const pct = total > 0 ? Math.round((found / total) * 100) : 0;
+            const matches = data.matches || [];
+
+            let html = `
+                <h3 style="color:#68d68d;">🌐 Cross-Site Component Search</h3>
+                <div style="margin:1rem 0; padding:1rem; background:rgba(104,214,141,0.06); border-radius:8px;">
+                    <div style="display:flex; align-items:baseline; gap:0.6rem;">
+                        <span style="font-size:2rem; font-weight:800; color:#68d68d;">${found}</span>
+                        <span style="font-size:0.85rem; color:#888;">of ${total} pages contain</span>
+                        <code style="font-size:0.85rem; color:#c9b8ff; background:rgba(255,255,255,0.06); padding:2px 8px; border-radius:4px;">${selector}</code>
+                    </div>
+                    <div style="margin-top:0.5rem; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                        <div style="height:100%; width:${pct}%; background:#68d68d; border-radius:3px;"></div>
+                    </div>
+                    <div style="font-size:0.7rem; color:#888; margin-top:4px;">${pct}% coverage across crawled pages</div>
+                </div>
+            `;
+
+            if (data.classification) {
+                const cls = data.classification;
+                const clsColor = cls === 'global' ? '#68d68d' : cls === 'common' ? '#7ec8e3' : cls === 'section-specific' ? '#ff9f0a' : '#c9b8ff';
+                html += `<div style="margin-bottom:1rem;"><span style="font-size:0.75rem; font-weight:600; color:${clsColor}; background:${clsColor}18; padding:3px 10px; border-radius:12px; border:1px solid ${clsColor}44;">${cls.replace('-', ' ').toUpperCase()}</span>
+                    <span style="font-size:0.75rem; color:#888; margin-left:8px;">${data.classification_reason || ''}</span></div>`;
+            }
+
+            if (matches.length > 0) {
+                html += `<div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Found on these pages</div>`;
+                matches.slice(0, 15).forEach(m => {
+                    const path = m.path || m.url || '';
+                    const variant = m.variant_note || '';
+                    html += `<div style="display:flex; align-items:center; gap:6px; padding:3px 0;">
+                        <span style="color:#68d68d; font-size:0.7rem;">✓</span>
+                        <span style="flex:1; font-size:0.72rem; color:#ccc; font-family:'SF Mono',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${path}</span>
+                        ${variant ? '<span style="font-size:0.62rem; color:#ff9f0a;">' + variant + '</span>' : ''}
+                    </div>`;
+                });
+                if (matches.length > 15) {
+                    html += `<div style="font-size:0.62rem; color:#555;">+${matches.length - 15} more pages</div>`;
+                }
+            }
+
+            if (data.not_found_sample && data.not_found_sample.length > 0) {
+                html += `<details style="margin-top:0.75rem;"><summary style="font-size:0.65rem; color:#555; cursor:pointer; text-transform:uppercase; letter-spacing:0.05em;">Pages without this component</summary>`;
+                data.not_found_sample.slice(0, 8).forEach(p => {
+                    html += `<div style="font-size:0.72rem; color:#666; padding:2px 0; font-family:'SF Mono',monospace;">${p}</div>`;
+                });
+                html += `</details>`;
+            }
+
+            card.innerHTML = html;
+            container.insertBefore(card, container.firstChild);
         }
 
         function escapeCode(code) {

@@ -253,6 +253,171 @@ def rip_component():
         }), 500
 
 
+@app.route('/api/rip-component/cross-site', methods=['POST'])
+def rip_component_cross_site():
+    """
+    Cross-site component search — uses Cloudflare crawl to find a CSS selector
+    pattern across multiple pages without Playwright per-page overhead.
+
+    Request body:
+    {
+        "site_url": "https://stripe.com",
+        "selector": "nav.site-nav"
+    }
+    """
+    from cloudflare_crawl import CloudflareCrawler, is_cloudflare_available
+    from bs4 import BeautifulSoup
+    from urllib.parse import urlparse
+    import re
+
+    if not is_cloudflare_available():
+        return jsonify({
+            'error': 'Cross-site search requires Cloudflare. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.',
+            'available': False
+        }), 503
+
+    data = request.json
+    site_url = data.get('site_url')
+    selector = data.get('selector')
+
+    if not site_url or not selector:
+        return jsonify({'error': 'site_url and selector are required'}), 400
+
+    site_url, url_error = validate_url(site_url)
+    if url_error:
+        return jsonify({'error': url_error}), 400
+
+    try:
+        print(f"\n{'='*70}")
+        print(f" 🌐 CROSS-SITE COMPONENT SEARCH")
+        print(f"    Site: {site_url}")
+        print(f"    Selector: {selector}")
+        print('='*70)
+
+        # Step 1: Crawl the site for HTML content
+        crawler = CloudflareCrawler()
+        result = run_async(crawler.crawl(
+            site_url,
+            limit=30,
+            depth=2,
+            formats=['html'],
+            render=True,
+            timeout=120
+        ))
+
+        pages = result.get('pages', [])
+        if not pages:
+            return jsonify({'error': 'Cloudflare crawl returned no pages', 'found_on': 0, 'total_pages': 0})
+
+        # Step 2: Parse selector into BeautifulSoup search args
+        # Convert CSS selector to BS4-compatible search
+        # Supports: tag, .class, #id, tag.class, .class1.class2
+        def parse_selector_for_bs4(sel):
+            """Convert a CSS selector to BeautifulSoup find() arguments."""
+            sel = sel.strip()
+            # Extract tag
+            tag_match = re.match(r'^([a-zA-Z][a-zA-Z0-9]*)', sel)
+            tag = tag_match.group(1) if tag_match else None
+
+            # Extract id
+            id_match = re.search(r'#([a-zA-Z0-9_-]+)', sel)
+            el_id = id_match.group(1) if id_match else None
+
+            # Extract classes
+            classes = re.findall(r'\.([a-zA-Z0-9_-]+)', sel)
+
+            attrs = {}
+            if el_id:
+                attrs['id'] = el_id
+            if classes:
+                # For multiple classes, use a function match
+                attrs['class'] = lambda x: x and all(c in (x if isinstance(x, list) else x.split()) for c in classes)
+
+            return tag, attrs
+
+        tag, attrs = parse_selector_for_bs4(selector)
+        base_host = urlparse(site_url).hostname
+
+        matches = []
+        not_found = []
+
+        for page in pages:
+            page_url = page.get('url') or page.get('sourceURL', '')
+            html_content = page.get('content') or page.get('html', '')
+            if not html_content:
+                continue
+
+            # Only search pages on the same domain
+            try:
+                page_host = urlparse(page_url).hostname
+                if page_host and base_host and page_host != base_host:
+                    continue
+            except Exception:
+                pass
+
+            try:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                found_elements = soup.find_all(tag, attrs) if tag else soup.find_all(attrs=attrs)
+
+                page_path = urlparse(page_url).path or '/'
+
+                if found_elements:
+                    # Check for variants — are there style differences?
+                    variant_note = ''
+                    if len(found_elements) > 1:
+                        variant_note = f'{len(found_elements)} instances'
+
+                    matches.append({
+                        'url': page_url,
+                        'path': page_path,
+                        'count': len(found_elements),
+                        'variant_note': variant_note
+                    })
+                else:
+                    not_found.append(page_path)
+            except Exception as e:
+                logger.debug(f"BS4 parse error on {page_url}: {e}")
+                continue
+
+        total_pages = len(matches) + len(not_found)
+        found_on = len(matches)
+
+        # Step 3: Classify the component
+        if total_pages == 0:
+            classification = 'unknown'
+            classification_reason = 'No pages could be analyzed'
+        elif found_on / max(total_pages, 1) >= 0.8:
+            classification = 'global'
+            classification_reason = f'Found on {found_on}/{total_pages} pages — likely a site-wide component (nav, footer, header)'
+        elif found_on / max(total_pages, 1) >= 0.4:
+            classification = 'common'
+            classification_reason = f'Found on {found_on}/{total_pages} pages — shared across many but not all pages'
+        elif found_on >= 2:
+            classification = 'section-specific'
+            classification_reason = f'Found on {found_on}/{total_pages} pages — appears in specific site sections'
+        else:
+            classification = 'page-specific'
+            classification_reason = f'Found on {found_on}/{total_pages} pages — unique to specific page(s)'
+
+        print(f"\n✅ Cross-site search complete: {found_on}/{total_pages} pages contain '{selector}'")
+        print(f"   Classification: {classification}")
+
+        return jsonify({
+            'success': True,
+            'selector': selector,
+            'found_on': found_on,
+            'total_pages': total_pages,
+            'classification': classification,
+            'classification_reason': classification_reason,
+            'matches': matches,
+            'not_found_sample': not_found[:10]
+        })
+
+    except Exception as e:
+        logger.error(f"Cross-site search failed: {e}", exc_info=True)
+        return jsonify({'error': f'Cross-site search failed: {str(e)}'}), 500
+
+
 @app.route('/api/extract-styles', methods=['POST'])
 def extract_styles():
     """
