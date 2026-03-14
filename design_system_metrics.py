@@ -493,17 +493,40 @@ class DesignSystemMetrics:
                 const zIndex = styles.zIndex;
 
                 if (zIndex && zIndex !== 'auto') {
+                    const z = parseInt(zIndex);
+                    if (isNaN(z)) continue;
                     // SVG elements have className as SVGAnimatedString
                     const safeClass = (typeof el.className === 'string')
                         ? el.className : (el.className?.baseVal || '');
+                    const bounds = el.getBoundingClientRect();
+                    const isVisible = bounds.width > 0 && bounds.height > 0
+                        && styles.visibility !== 'hidden'
+                        && styles.display !== 'none';
+                    const isFixed = styles.position === 'fixed';
+                    const isSticky = styles.position === 'sticky';
+                    const isInteractive = ['A','BUTTON','INPUT','SELECT','TEXTAREA'].includes(el.tagName)
+                        || el.getAttribute('role') === 'button'
+                        || el.getAttribute('tabindex') !== null;
+                    const textPreview = el.textContent?.trim()?.substring(0, 40) || '';
                     zIndexes.push({
-                        z: parseInt(zIndex),
+                        z: z,
                         tag: el.tagName.toLowerCase(),
                         classes: safeClass,
                         id: el.id || '',
                         role: el.getAttribute('role') || '',
                         ariaLabel: el.getAttribute('aria-label') || '',
-                        position: styles.position
+                        position: styles.position,
+                        isFixed: isFixed,
+                        isSticky: isSticky,
+                        isVisible: isVisible,
+                        isInteractive: isInteractive,
+                        textPreview: textPreview,
+                        bounds: {
+                            x: Math.round(bounds.left),
+                            y: Math.round(bounds.top),
+                            width: Math.round(bounds.width),
+                            height: Math.round(bounds.height)
+                        }
                     });
                 }
             }
@@ -511,7 +534,7 @@ class DesignSystemMetrics:
             return zIndexes;
         }''')
 
-        # Categorize z-indexes into layers
+        # Categorize z-indexes into semantic tiers
         layers = self._categorize_z_indexes(result)
 
         # Detect conflicts
@@ -520,12 +543,20 @@ class DesignSystemMetrics:
         # Health summary
         health = self._z_index_health(result)
 
+        # Count visible vs ghost
+        visible_count = sum(1 for d in result if d.get('isVisible', True))
+        ghost_count = sum(1 for d in result if not d.get('isVisible', True))
+        # Count tiers (exclude ghost tier from count)
+        tier_count = sum(1 for v in layers.values() if v.get('tier') != 'Ghost')
+
         return {
             'confidence': 90 if result else 60,
-            'pattern': f'{len(layers)} stacking layers detected',
+            'pattern': f'{tier_count} semantic tier{"s" if tier_count != 1 else ""} detected',
             'layers': layers,
             'health': health,
             'total_elements': len(result),
+            'visible_elements': visible_count,
+            'ghost_elements': ghost_count,
             'conflicts': conflicts,
             'evidence': {
                 'samples': result[:10]
@@ -564,91 +595,202 @@ class DesignSystemMetrics:
                 return f"{el['tag']}.{first_class[:30]}"
         return el.get('tag', 'div')
 
+    # ── Tier definitions for z-index grouping ──
+    _Z_TIERS = [
+        ('Below',    lambda z: z < 0,                'Background decorations'),
+        ('Base',     lambda z: 0 <= z <= 1,          'Default stacking'),
+        ('Elevated', lambda z: 2 <= z <= 99,         'Sticky headers, dropdowns, cards'),
+        ('Overlay',  lambda z: 100 <= z <= 999,      'Modals, drawers, overlays'),
+        ('Critical', lambda z: 1000 <= z <= 9999,    'System UI, notifications'),
+        ('Extreme',  lambda z: z >= 10000,           'Z-index wars / framework overrides'),
+    ]
+
+    @staticmethod
+    def _infer_purpose(elements: List[Dict]) -> str:
+        """Infer semantic purpose of a group of z-index elements from their DOM."""
+        purposes = set()
+        for el in elements:
+            tag = el.get('tag', '')
+            role = el.get('role', '')
+            classes = el.get('classes', '').lower()
+            pos = el.get('position', '')
+
+            if tag == 'nav' or role == 'navigation' or 'nav' in classes:
+                purposes.add('Navigation')
+            elif role == 'dialog' or 'modal' in classes or 'dialog' in classes:
+                purposes.add('Modal')
+            elif 'overlay' in classes or 'backdrop' in classes:
+                purposes.add('Overlay')
+            elif 'tooltip' in classes or role == 'tooltip':
+                purposes.add('Tooltip')
+            elif 'dropdown' in classes or 'menu' in classes or role == 'menu':
+                purposes.add('Dropdown')
+            elif 'toast' in classes or 'snackbar' in classes or 'notification' in classes:
+                purposes.add('Notification')
+            elif tag == 'header' or role == 'banner' or 'header' in classes:
+                purposes.add('Header')
+            elif tag == 'footer' or role == 'contentinfo':
+                purposes.add('Footer')
+            elif 'player' in classes or 'audio' in classes or 'video' in classes:
+                purposes.add('Media Player')
+            elif pos == 'fixed':
+                purposes.add('Fixed UI')
+            elif pos == 'sticky':
+                purposes.add('Sticky')
+
+        return ' / '.join(sorted(purposes)) if purposes else 'Content'
+
     def _categorize_z_indexes(self, z_data: List[Dict]) -> Dict:
         """
-        Categorize z-indexes into logical layers with smart labels
+        Categorize z-indexes into semantic tiers with purpose inference.
+        Groups related z-values instead of creating one layer per value.
         """
         if not z_data:
             return {}
 
-        # Get unique z-index values
-        z_values = sorted(set(item['z'] for item in z_data))
+        # Separate visible from ghost elements
+        visible_data = [d for d in z_data if d.get('isVisible', True)]
+        ghost_data = [d for d in z_data if not d.get('isVisible', True)]
 
         layers = {}
+        for tier_name, tier_test, tier_desc in self._Z_TIERS:
+            tier_elements = [d for d in visible_data if tier_test(d['z'])]
+            if not tier_elements:
+                continue
 
-        for z in z_values:
-            elements = [item for item in z_data if item['z'] == z]
+            z_values_in_tier = sorted(set(d['z'] for d in tier_elements))
+            purpose = self._infer_purpose(tier_elements)
 
-            # Determine layer name based on z-index value
-            if z <= 1:
-                layer_name = f'Layer {z} (base)'
-            elif z <= 10:
-                layer_name = f'Layer {z} (dropdowns)'
-            elif z <= 100:
-                layer_name = f'Layer {z} (modals)'
-            elif z <= 1000:
-                layer_name = f'Layer {z} (tooltips)'
-            else:
-                layer_name = f'Layer {z} (top)'
+            # Build enriched element list with labels, bounds, position
+            enriched = []
+            for el in tier_elements[:8]:
+                enriched.append({
+                    'label': self._smart_label(el),
+                    'z': el['z'],
+                    'position': el.get('position', 'static'),
+                    'isInteractive': el.get('isInteractive', False),
+                    'isVisible': True,
+                    'bounds': el.get('bounds', {}),
+                    'textPreview': el.get('textPreview', ''),
+                })
 
-            layers[layer_name] = {
-                'z_index': z,
-                'count': len(elements),
-                'elements': [self._smart_label(e) for e in elements[:5]]
+            layers[f'{tier_name}: {purpose}'] = {
+                'z_index': z_values_in_tier[0],  # lowest in tier
+                'z_max': z_values_in_tier[-1],
+                'z_values': z_values_in_tier,
+                'count': len(tier_elements),
+                'visible_count': len(tier_elements),
+                'interactive_count': sum(1 for d in tier_elements if d.get('isInteractive')),
+                'ghost_count': 0,
+                'tier': tier_name,
+                'tier_desc': tier_desc,
+                'purpose': purpose,
+                'elements': enriched,
+            }
+
+        # Ghost tier (zero-size elements)
+        if ghost_data:
+            layers['Ghost: Tracking / Hidden'] = {
+                'z_index': min(d['z'] for d in ghost_data),
+                'z_max': max(d['z'] for d in ghost_data),
+                'z_values': sorted(set(d['z'] for d in ghost_data)),
+                'count': len(ghost_data),
+                'visible_count': 0,
+                'interactive_count': 0,
+                'ghost_count': len(ghost_data),
+                'tier': 'Ghost',
+                'tier_desc': 'Zero-size or hidden elements',
+                'purpose': 'Tracking / Hidden',
+                'elements': [{'label': self._smart_label(e), 'z': e['z'],
+                              'isVisible': False, 'bounds': e.get('bounds', {})}
+                             for e in ghost_data[:5]],
             }
 
         return layers
 
     def _z_index_health(self, z_data: List[Dict]) -> Dict:
-        """Compute z-index health summary: Clean / Complex / Chaotic"""
+        """Compute z-index health: Clean / Complex / Chaotic, with system analysis."""
         if not z_data:
             return {'level': 'Clean', 'detail': 'No z-index values detected'}
-        unique = len(set(item['z'] for item in z_data))
-        max_z = max(item['z'] for item in z_data)
-        if unique <= 5 and max_z <= 1000:
-            return {'level': 'Clean', 'detail': f'{unique} unique values, max z-index {max_z}'}
-        elif unique <= 10:
-            return {'level': 'Complex', 'detail': f'{unique} unique values, max z-index {max_z}'}
+
+        visible = [d for d in z_data if d.get('isVisible', True)]
+        unique_z = sorted(set(d['z'] for d in visible))
+        num_unique = len(unique_z)
+        max_z = max(unique_z) if unique_z else 0
+
+        # Detect intentionality: powers of 10, multiples of 100/10
+        intentional_values = [z for z in unique_z if z == 0 or z == 1 or (z > 0 and (z % 10 == 0 or z % 100 == 0))]
+        intentional_ratio = len(intentional_values) / max(1, num_unique)
+        is_intentional = intentional_ratio >= 0.6
+
+        # Spread ratio: high with few values = intentional spacing
+        spread_ratio = max_z / max(1, num_unique) if max_z > 0 else 0
+
+        # Fixed/sticky count
+        fixed_count = sum(1 for d in visible if d.get('isFixed'))
+        sticky_count = sum(1 for d in visible if d.get('isSticky'))
+
+        # Determine level
+        if num_unique <= 5 and max_z <= 1000:
+            level = 'Clean'
+            detail = f'{num_unique} intentional tiers' if is_intentional else f'{num_unique} values, max {max_z}'
+        elif num_unique <= 10 and max_z <= 10000:
+            level = 'Complex'
+            detail = f'{num_unique} values (max {max_z})'
+            if not is_intentional:
+                detail += ' — ad-hoc values detected'
         else:
-            return {'level': 'Chaotic', 'detail': f'{unique} unique values, max z-index {max_z} — consider consolidating'}
+            level = 'Chaotic'
+            detail = f'{num_unique} values, max {max_z} — consider consolidating to 5 tiers'
+
+        return {
+            'level': level,
+            'detail': detail,
+            'unique_count': num_unique,
+            'max_z': max_z,
+            'is_intentional': is_intentional,
+            'intentional_ratio': round(intentional_ratio, 2),
+            'fixed_count': fixed_count,
+            'sticky_count': sticky_count,
+        }
 
     def _detect_z_conflicts(self, z_data: List[Dict]) -> List[str]:
         """
-        Detect potential z-index conflicts or anti-patterns
-
-        Heuristic: Identifies problematic z-index patterns
-        1. Extremely high values (>9999) - indicates z-index wars
-        2. Unusual specific values (e.g., 2347) - suggests manual tweaking
-        3. Too many layers (>10) - indicates lack of system
-
-        Rationale:
-        - Good design systems use 5-8 intentional layers (1, 10, 100, 1000)
-        - Random values suggest ad-hoc fixes, not systematic thinking
-        - Values >9999 indicate escalating conflicts
-
-        Failure modes:
-        - Framework-generated high values may trigger false positives
-        - Some libraries use specific values intentionally (e.g., 9999 for modals)
+        Detect z-index anti-patterns with actionable, specific messages.
         """
         conflicts = []
+        visible = [d for d in z_data if d.get('isVisible', True)]
+        z_values = [d['z'] for d in visible]
+        if not z_values:
+            return ['✅ No z-index values detected']
 
-        z_values = [item['z'] for item in z_data]
+        unique_z = sorted(set(z_values))
 
-        # Check for random high values
-        if any(z > 9999 for z in z_values):
-            conflicts.append('⚠️  Extremely high z-index detected (>9999)')
+        # Z-index wars: multiple values above 10000
+        extreme = [z for z in unique_z if z >= 10000]
+        if len(extreme) >= 2:
+            conflicts.append(f'⚠️  Z-index war: {len(extreme)} values above 10000 ({", ".join(str(z) for z in extreme[:4])}). Consider consolidating to a single overlay tier.')
+        elif len(extreme) == 1:
+            conflicts.append(f'⚠️  Extreme z-index ({extreme[0]}) — may indicate framework override or escalation.')
 
-        # Check for odd specific values (anti-pattern)
-        weird_values = [z for z in z_values if z > 10 and z % 10 not in [0, 1, 5]]
-        if weird_values:
-            conflicts.append(f'⚠️  Unusual z-index values: {weird_values[:3]}')
+        # Crowded tier: many values in a small range
+        elevated = [z for z in unique_z if 2 <= z <= 99]
+        if len(elevated) > 5:
+            conflicts.append(f'⚠️  Crowded elevated tier: {len(elevated)} values between 2-99 — these may visually conflict.')
 
-        # Check for too many layers
-        unique_z = len(set(z_values))
-        if unique_z > 10:
-            conflicts.append(f'⚠️  Too many z-index layers ({unique_z})')
+        # Orphan values that don't fit tier patterns
+        orphans = [z for z in unique_z if z > 1 and z not in [10, 50, 100, 200, 500, 1000, 2000, 5000, 9999]
+                    and z % 10 not in [0, 5] and z < 10000]
+        if orphans:
+            conflicts.append(f'⚠️  Orphan values: {", ".join(str(z) for z in orphans[:5])} — likely ad-hoc fixes.')
 
-        return conflicts if conflicts else ['✅ No conflicts detected']
+        if not conflicts:
+            clean_msg = f'✅ Clean system: {len(unique_z)} intentional tier{"s" if len(unique_z) != 1 else ""}'
+            if len(unique_z) <= 5:
+                clean_msg += f' at {", ".join(str(z) for z in unique_z)}'
+            conflicts.append(clean_msg)
+
+        return conflicts
 
     async def extract_border_radius_scale(self) -> Dict:
         """

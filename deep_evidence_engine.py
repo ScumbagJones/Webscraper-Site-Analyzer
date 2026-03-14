@@ -2057,14 +2057,34 @@ class DeepEvidenceEngine:
                 const safeClass = (typeof el.className === 'string') ? el.className : (el.className?.baseVal || '');
                 const selector = el.id ? '#' + el.id : (safeClass ? '.' + safeClass.split(' ')[0] : el.tagName.toLowerCase());
 
+                // Detect child tags for pattern annotation
+                const childTags = Array.from(el.children).slice(0, 10).map(c => c.tagName.toLowerCase());
+                const childCount = el.children.length;
+
                 if (display === 'grid') {
                     layouts.grid_count++;
                     if (layouts.grid_examples.length < 3) {
+                        const cols = styles.gridTemplateColumns || '';
+                        const colParts = cols.split(' ').filter(Boolean);
+                        const uniqueCols = [...new Set(colParts)];
+                        // Pattern detection for grid
+                        let pattern = 'Grid layout';
+                        if (cols.includes('auto-fit') || cols.includes('auto-fill'))
+                            pattern = 'Responsive card grid';
+                        else if (uniqueCols.length === 1 && colParts.length >= 3)
+                            pattern = colParts.length + '-column card grid';
+                        else if (colParts.length === 2)
+                            pattern = '2-column layout (content + sidebar)';
+                        else if (colParts.length >= 4)
+                            pattern = colParts.length + '-column grid';
+
                         layouts.grid_examples.push({
                             selector: selector,
-                            columns: styles.gridTemplateColumns,
+                            columns: cols,
                             rows: styles.gridTemplateRows,
-                            gap: styles.gap
+                            gap: styles.gap,
+                            pattern: pattern,
+                            child_count: childCount
                         });
                     }
                 }
@@ -2072,12 +2092,34 @@ class DeepEvidenceEngine:
                 if (display === 'flex') {
                     layouts.flex_count++;
                     if (layouts.flex_examples.length < 3) {
+                        const dir = styles.flexDirection || 'row';
+                        const justify = styles.justifyContent || 'normal';
+                        const align = styles.alignItems || 'normal';
+                        // Pattern detection for flex
+                        let pattern = 'Flex container';
+                        const hasButtons = childTags.some(t => t === 'button' || t === 'a');
+                        const hasInputs = childTags.some(t => t === 'input' || t === 'textarea');
+                        if (dir === 'row' && justify === 'space-between')
+                            pattern = 'Spaced row (nav bar / header)';
+                        else if (dir === 'row' && hasButtons && childCount <= 6)
+                            pattern = 'Button row / toolbar';
+                        else if (dir === 'row' && align === 'center' && childCount <= 4)
+                            pattern = 'Centered row (icon + label)';
+                        else if (dir === 'column' && childCount >= 3)
+                            pattern = 'Vertical stack / card list';
+                        else if (dir === 'row' && hasInputs)
+                            pattern = 'Form row (input + button)';
+                        else if (dir === 'row' && childCount >= 3)
+                            pattern = 'Horizontal group (' + childCount + ' items)';
+
                         layouts.flex_examples.push({
                             selector: selector,
-                            direction: styles.flexDirection,
+                            direction: dir,
                             wrap: styles.flexWrap,
-                            justify: styles.justifyContent,
-                            align: styles.alignItems
+                            justify: justify,
+                            align: align,
+                            pattern: pattern,
+                            child_count: childCount
                         });
                     }
                 }

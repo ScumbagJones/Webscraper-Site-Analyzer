@@ -492,20 +492,20 @@
             margin-left: auto;
         }
 
-        /* Card hiding when below confidence threshold */
+        /* Cards below confidence threshold — dimmed but always visible */
         .metric-card.conf-suppressed {
-            display: none;
+            opacity: 0.45;
+            filter: grayscale(0.3);
+            transition: opacity 0.3s, filter 0.3s;
         }
-        /* When "show all" is toggled, reveal suppressed cards dimmed */
-        .metrics-grid.show-all-metrics .metric-card.conf-suppressed {
-            display: block;
-            opacity: 0.28;
-            filter: grayscale(0.6);
-            pointer-events: none;
+        .metric-card.conf-suppressed:hover {
+            opacity: 0.7;
+            filter: grayscale(0.1);
         }
-        .metrics-grid.show-all-metrics .metric-card.conf-suppressed:hover {
-            transform: none;
-            box-shadow: none;
+        /* Confidence badge stays fully readable even on dimmed cards */
+        .metric-card.conf-suppressed .confidence-badge {
+            opacity: 1;
+            filter: none;
         }
 
         .metric-value {
@@ -872,6 +872,7 @@
             border-radius: var(--radius-sm);
             overflow: hidden;
             border: 1px solid var(--border-subtle);
+            cursor: pointer;
         }
         .motion-track-dot {
             position: absolute;
@@ -880,7 +881,13 @@
             border-radius: 50%;
             background: #c9b8ff;
             transform: translateY(-50%);
-            animation: motion-track-slide 1.8s var(--easing-fn, ease) infinite alternate;
+            /* Default: still (no animation). Activated on hover/tap. */
+            animation: none;
+            transition: box-shadow 0.2s;
+        }
+        .motion-track--active .motion-track-dot {
+            animation: motion-track-slide 1.8s var(--easing-fn, ease) 1 forwards;
+            box-shadow: 0 0 8px #c9b8ff88;
         }
         .race-track {
             position: relative;
@@ -6325,28 +6332,30 @@
                 </div>
             `;
 
-            // Visual stack — uses semantic layer names, color-coded by purpose
-            const getLayerColor = (name) => {
-                if (name.includes('Navigation') || name.includes('Header')) return { r: 10, g: 132, b: 255 };   // blue
-                if (name.includes('Dialog') || name.includes('Modal')) return { r: 175, g: 82, b: 222 };        // purple
-                if (name.includes('Overlay') || name.includes('Sticky')) return { r: 255, g: 159, b: 10 };      // orange
-                if (name.includes('ghost') || name.includes('Tracking')) return { r: 100, g: 100, b: 100 };     // gray
-                if (name.includes('Footer')) return { r: 52, g: 199, b: 89 };                                    // green
-                return { r: 10, g: 132, b: 255 };                                                                // default blue
+            // Visual stack — color-coded by tier
+            const getTierColor = (name) => {
+                if (name.startsWith('Extreme'))  return { r: 255, g: 69, b: 58 };     // red
+                if (name.startsWith('Critical')) return { r: 255, g: 159, b: 10 };     // orange
+                if (name.startsWith('Overlay'))  return { r: 175, g: 82, b: 222 };     // purple
+                if (name.startsWith('Elevated')) return { r: 10, g: 132, b: 255 };     // blue
+                if (name.startsWith('Base'))     return { r: 52, g: 199, b: 89 };      // green
+                if (name.startsWith('Below'))    return { r: 100, g: 100, b: 100 };    // gray
+                if (name.startsWith('Ghost'))    return { r: 80, g: 80, b: 80 };       // dark gray
+                return { r: 10, g: 132, b: 255 };
             };
+            const getLayerColor = getTierColor;
 
-            // Build vertical layer stack — bottom-to-top, proportional spacing
+            // Build vertical tier stack — bottom-to-top
             const sortedLayers = [...visibleLayers].sort((a, b) => {
-                const zA = a[1].z_index || parseInt(a[0].match(/\d+/)?.[0] || '0');
-                const zB = b[1].z_index || parseInt(b[0].match(/\d+/)?.[0] || '0');
+                const zA = a[1].z_index || 0;
+                const zB = b[1].z_index || 0;
                 return zA - zB;
             });
-            const MAX_DISPLAY_LAYERS = 12;
-            const hiddenLayerCount = Math.max(0, sortedLayers.length - MAX_DISPLAY_LAYERS);
-            const displayLayers = hiddenLayerCount > 0 ? sortedLayers.slice(-MAX_DISPLAY_LAYERS) : sortedLayers; // keep top layers
-            const zValues = sortedLayers.map(([n, info]) => info.z_index || parseInt(n.match(/\d+/)?.[0] || '0'));
+            const displayLayers = sortedLayers; // tiers are already consolidated (typically 3-5)
+            const hiddenLayerCount = 0;
+            const zValues = sortedLayers.map(([n, info]) => info.z_max || info.z_index || 0);
             const maxZ = Math.max(...zValues, 1);
-            const stackHeight = Math.max(180, Math.min(360, 60 + displayLayers.length * 36));
+            const stackHeight = Math.max(180, Math.min(360, 80 + displayLayers.length * 50));
             const zTooltipId = 'z-tooltip-' + Math.random().toString(36).slice(2, 8);
 
             const visualStackHTML = `
@@ -6354,9 +6363,9 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                         <div>
                             <div style="font-size: 2.5rem; font-weight: 700; color: #0a84ff; line-height: 1;">${layerCount}</div>
-                            <div style="font-size: 0.82rem; color: #888; margin-top: 0.2rem;">Stacking Layers</div>
-                            ${layerCount > 8 ? '<div style="font-size: 0.72rem; color: #ff9f0a; margin-top: 0.4rem;">High complexity (typical: 5-8)</div>' : ''}
-                            ${layerCount <= 5 && layerCount > 0 ? '<div style="font-size: 0.72rem; color: #34c759; margin-top: 0.4rem;">Clean architecture</div>' : ''}
+                            <div style="font-size: 0.82rem; color: #888; margin-top: 0.2rem;">Stacking Tier${layerCount !== 1 ? 's' : ''}</div>
+                            ${layerCount > 4 ? '<div style="font-size: 0.72rem; color: #ff9f0a; margin-top: 0.4rem;">Complex layering (typical: 2-4 tiers)</div>' : ''}
+                            ${layerCount <= 3 && layerCount > 0 ? '<div style="font-size: 0.72rem; color: #34c759; margin-top: 0.4rem;">Clean architecture</div>' : ''}
                         </div>
                         <div style="font-size: 0.68rem; color: #555; text-align: right;">
                             <div>highest: z-index ${Math.max(...zValues)}</div>
@@ -6374,30 +6383,36 @@
                             <div style="position:absolute; bottom:0; left:48px; font-size:0.65rem; color:var(--text-disabled); font-style:italic;">+${hiddenLayerCount} more layer${hiddenLayerCount !== 1 ? 's' : ''} below</div>
                         ` : ''}
                         ${displayLayers.map(([name, info], i) => {
-                            const z = info.z_index || parseInt(name.match(/\d+/)?.[0] || '0');
+                            const z = info.z_index || 0;
+                            const zMax = info.z_max || z;
+                            const zRange = z === zMax ? `z: ${z}` : `z: ${z}–${zMax}`;
+                            const zValuesArr = info.z_values || [z];
                             const c = getLayerColor(name);
                             const count = info.visible_count || info.count || 0;
                             const interCount = info.interactive_count || 0;
-                            const shortLabel = name.includes(': ') ? name.split(': ').slice(1).join(': ') : name;
-                            // Log-scale for vertical position (compress large jumps)
-                            const useLog = displayLayers.length > 3 && maxZ > 100;
-                            const pos = useLog
-                                ? Math.log(z + 1) / Math.log(maxZ + 1)
-                                : (displayLayers.length <= 1 ? 0.5 : i / (displayLayers.length - 1));
-                            const bottomPx = Math.round(pos * (stackHeight - 32)) + 4;
-                            // Build tooltip content (elements)
+                            const tierName = name.includes(': ') ? name.split(': ')[0] : name;
+                            const purpose = name.includes(': ') ? name.split(': ').slice(1).join(': ') : '';
+                            const tierDesc = info.tier_desc || '';
+                            // Even spacing for tiers (no log scale needed — already consolidated)
+                            const pos = displayLayers.length <= 1 ? 0.5 : i / (displayLayers.length - 1);
+                            const bottomPx = Math.round(pos * (stackHeight - 40)) + 8;
+                            // Build tooltip content
                             const els = (info.elements || []).filter(el => el.isVisible !== false).slice(0, 3);
-                            const elStr = els.map(el => (el.label || el.selector || '?').replace(/"/g, '&quot;').replace(/'/g, '&#39;')).join('<br>');
+                            const elStr = els.map(el => (el.label || '?').replace(/"/g, '&quot;').replace(/'/g, '&#39;')).join('<br>');
+                            const valuesStr = zValuesArr.length > 1 ? `Values: ${zValuesArr.join(', ')}` : '';
                             return `
-                            <div style="position: absolute; bottom: ${bottomPx}px; left: 0; right: 0; height: 28px; display: flex; align-items: center; cursor: pointer; transition: background 0.15s;"
-                                 onmouseenter="this.style.background='rgba(${c.r},${c.g},${c.b},0.08)';var t=document.getElementById('${zTooltipId}');t.innerHTML='<strong>${shortLabel.replace(/'/g, '&#39;')}</strong><br>z-index: ${z}<br>${count} elements${interCount ? ', '+interCount+' interactive' : ''}<br><span style=\\'color:#666\\'>${elStr || 'no element details'}</span>';t.style.display='block';t.style.bottom='${bottomPx}px';"
+                            <div style="position: absolute; bottom: ${bottomPx}px; left: 0; right: 0; min-height: 36px; display: flex; align-items: center; cursor: pointer; transition: background 0.15s;"
+                                 onmouseenter="this.style.background='rgba(${c.r},${c.g},${c.b},0.08)';var t=document.getElementById('${zTooltipId}');t.innerHTML='<strong>${tierName}</strong>: ${purpose.replace(/'/g, '&#39;')}<br>${zRange} (${zValuesArr.length} value${zValuesArr.length!==1?'s':''})<br>${count} elements${interCount ? ', '+interCount+' interactive' : ''}<br>${tierDesc ? '<span style=\\'color:#888\\'>'+tierDesc+'</span><br>' : ''}<span style=\\'color:#666\\'>${elStr || ''}</span>${valuesStr ? '<br><span style=\\'color:#555; font-family:monospace\\'>'+valuesStr+'</span>' : ''}';t.style.display='block';t.style.bottom='${bottomPx}px';"
                                  onmouseleave="this.style.background='none';document.getElementById('${zTooltipId}').style.display='none';">
-                                <!-- z-value -->
-                                <div style="width: 48px; font-size: 0.68rem; color: #888; font-family: 'SF Mono', monospace; text-align: right; padding-right: 8px;">${z}</div>
-                                <!-- bar -->
-                                <div style="flex: 1; height: 22px; background: linear-gradient(90deg, rgba(${c.r},${c.g},${c.b},0.35), rgba(${c.r},${c.g},${c.b},0.12)); border-left: 3px solid rgb(${c.r},${c.g},${c.b}); border-radius: 0 4px 4px 0; display: flex; align-items: center; justify-content: space-between; padding: 0 8px;">
-                                    <span style="font-size: 0.68rem; color: rgba(255,255,255,0.85); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${shortLabel}</span>
-                                    <span style="font-size: 0.62rem; color: rgba(255,255,255,0.5); white-space: nowrap; margin-left: 8px;">${count} el${count !== 1 ? 's' : ''}${interCount ? ' · '+interCount+' int' : ''}</span>
+                                <!-- z-range -->
+                                <div style="width: 64px; font-size: 0.65rem; color: #888; font-family: 'SF Mono', monospace; text-align: right; padding-right: 8px; line-height: 1.2;">${zRange}</div>
+                                <!-- tier bar -->
+                                <div style="flex: 1; min-height: 32px; background: linear-gradient(90deg, rgba(${c.r},${c.g},${c.b},0.30), rgba(${c.r},${c.g},${c.b},0.08)); border-left: 3px solid rgb(${c.r},${c.g},${c.b}); border-radius: 0 6px 6px 0; display: flex; align-items: center; justify-content: space-between; padding: 4px 10px;">
+                                    <div style="min-width: 0; overflow: hidden;">
+                                        <div style="font-size: 0.72rem; color: rgba(255,255,255,0.9); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${tierName}</div>
+                                        ${purpose ? `<div style="font-size: 0.62rem; color: rgba(255,255,255,0.5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${purpose}</div>` : ''}
+                                    </div>
+                                    <span style="font-size: 0.62rem; color: rgba(255,255,255,0.4); white-space: nowrap; margin-left: 8px;">${count} el${count !== 1 ? 's' : ''}${interCount ? ' · '+interCount+' ⚡' : ''}</span>
                                 </div>
                             </div>`;
                         }).join('')}
@@ -8203,8 +8218,17 @@
                 </div>
             ` : '';
 
-            // Twitter card badge if present
-            const twitterBadge = details.twitter_card ? `<span style="display:inline-block; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#7ec8e3; border-radius:4px; padding:2px 8px; font-size:0.68rem; margin-left:6px;">Twitter Card: ${details.twitter_card}</span>` : '';
+            // Social meta section (Twitter Card + Open Graph) — rendered in card body, not title
+            const ogType = details.og_type || '';
+            const twitterCard = details.twitter_card || '';
+            const socialPills = [];
+            if (ogType) socialPills.push(`<span style="display:inline-block; background:rgba(10,132,255,0.1); border:1px solid rgba(10,132,255,0.2); color:#0a84ff; border-radius:4px; padding:2px 8px; font-size:0.62rem;">OG: ${ogType}</span>`);
+            if (twitterCard) socialPills.push(`<span style="display:inline-block; background:rgba(126,200,227,0.1); border:1px solid rgba(126,200,227,0.2); color:#7ec8e3; border-radius:4px; padding:2px 8px; font-size:0.62rem;">Twitter: ${twitterCard}</span>`);
+            const socialMetaHTML = socialPills.length ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.45rem; margin-top:0.4rem;">
+                    <div style="font-size:0.62rem; color:#666; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Social Meta</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:4px;">${socialPills.join('')}</div>
+                </div>` : '';
 
             // Brand assets (logo, favicon)
             const brandAssets = data.brand_assets || {};
@@ -8234,7 +8258,6 @@
                     <div class="metric-title">
                         <span class="metric-icon">${icon}</span>
                         ${title}
-                        ${twitterBadge}
                     </div>
                     <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
@@ -8260,6 +8283,9 @@
                     <div style="margin-bottom:0.2rem;">
                         ${checksHTML}
                     </div>
+
+                    <!-- Social meta (Twitter Card + OG) -->
+                    ${socialMetaHTML}
 
                     <!-- Recommendations -->
                     ${recsHTML}
@@ -8301,41 +8327,44 @@
                 </div>
             `).join('');
 
-            // Grid examples (up to 2, cleaned up)
-            const gridExamples = (details.grid_examples || []).slice(0, 2);
-            const gridHTML = gridExamples.length ? `
+            // Layout examples with pattern annotations
+            const allExamples = [
+                ...(details.grid_examples || []).slice(0, 2).map(g => ({ ...g, type: 'Grid', color: '#68d68d' })),
+                ...(details.flex_examples || []).slice(0, 2).map(f => ({ ...f, type: 'Flex', color: '#7ec8e3' }))
+            ];
+            const examplesHTML = allExamples.length ? `
                 <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
-                    <div style="font-size:0.7rem; color:#68d68d; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Grid Examples</div>
-                    ${gridExamples.map(g => {
-                        // Simplify column definitions: if all same value, show as "repeat(N, Xpx)"
-                        const cols = g.columns || '';
-                        const colParts = cols.split(' ').filter(Boolean);
-                        const uniqueCols = [...new Set(colParts)];
-                        const colDisplay = uniqueCols.length === 1 && colParts.length > 3
-                            ? 'repeat(' + colParts.length + ', ' + uniqueCols[0] + ')'
-                            : cols.substring(0, 80) + (cols.length > 80 ? '…' : '');
-                        return `<div style="background:rgba(255,255,255,0.04); border-radius:5px; padding:6px 8px; margin-bottom:4px; font-family:'SF Mono',monospace; font-size:0.7rem; color:#999;">
-                            <span style="color:#68d68d;">${g.selector}</span> {<br>
-                            &nbsp;&nbsp;grid-template-columns: ${colDisplay};<br>
-                            &nbsp;&nbsp;gap: ${g.gap};<br>
-                        }</div>`;
+                    <div style="font-size:0.7rem; color:#888; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Layout Patterns</div>
+                    ${allExamples.map(ex => {
+                        const patternName = ex.pattern || ex.type + ' container';
+                        const details_parts = [];
+                        if (ex.columns) {
+                            const cols = ex.columns || '';
+                            const colParts = cols.split(' ').filter(Boolean);
+                            const uniqueCols = [...new Set(colParts)];
+                            details_parts.push(uniqueCols.length === 1 && colParts.length > 3
+                                ? 'repeat(' + colParts.length + ', ' + uniqueCols[0] + ')'
+                                : cols.substring(0, 50));
+                            if (ex.gap && ex.gap !== 'normal') details_parts.push('gap: ' + ex.gap);
+                        } else {
+                            if (ex.direction && ex.direction !== 'row') details_parts.push(ex.direction);
+                            if (ex.justify && ex.justify !== 'normal' && ex.justify !== 'flex-start') details_parts.push(ex.justify);
+                            if (ex.align && ex.align !== 'normal' && ex.align !== 'stretch') details_parts.push(ex.align);
+                        }
+                        return `<div style="background:rgba(255,255,255,0.04); border-radius:6px; padding:8px 10px; margin-bottom:5px; border-left:3px solid ${ex.color};">
+                            <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                                <span style="font-size:0.78rem; font-weight:600; color:${ex.color};">${patternName}</span>
+                                ${ex.child_count ? '<span style="font-size:0.6rem; color:#666;">' + ex.child_count + ' children</span>' : ''}
+                            </div>
+                            <div style="font-family:\'SF Mono\',monospace; font-size:0.65rem; color:#888;">
+                                <span style="color:#666;">${ex.selector}</span>${details_parts.length ? ' — ' + details_parts.join(', ') : ''}
+                            </div>
+                        </div>`;
                     }).join('')}
                 </div>
             ` : '';
-
-            // Flex examples (up to 2)
-            const flexExamples = (details.flex_examples || []).slice(0, 2);
-            const flexHTML = flexExamples.length ? `
-                <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:0.5rem;">
-                    <div style="font-size:0.7rem; color:#7ec8e3; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;">Flex Examples</div>
-                    ${flexExamples.map(f => `<div style="background:rgba(255,255,255,0.04); border-radius:5px; padding:6px 8px; margin-bottom:4px; font-family:'SF Mono',monospace; font-size:0.7rem; color:#999;">
-                        <span style="color:#7ec8e3;">${f.selector}</span> {<br>
-                        &nbsp;&nbsp;flex-direction: ${f.direction};<br>
-                        &nbsp;&nbsp;justify-content: ${f.justify};<br>
-                        &nbsp;&nbsp;align-items: ${f.align};<br>
-                    }</div>`).join('')}
-                </div>
-            ` : '';
+            const gridHTML = '';
+            const flexHTML = '';
 
             return `
                 <div class="metric-header">
@@ -8359,11 +8388,8 @@
                         ${pillsHTML}
                     </div>
 
-                    <!-- Grid examples -->
-                    ${gridHTML}
-
-                    <!-- Flex examples -->
-                    ${flexHTML}
+                    <!-- Layout pattern examples -->
+                    ${examplesHTML}
                 </div>
             `;
         }
@@ -8463,7 +8489,10 @@
 
             const easingHTML = curves.length > 0 ? `
                 <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.75rem;">
-                    <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">Easing Palette</div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;">
+                        <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em;">Easing Palette</div>
+                        <button onclick="playAllMotionTracks(this)" style="font-size:0.62rem; padding:3px 10px; background:rgba(201,184,255,0.12); border:1px solid rgba(201,184,255,0.3); border-radius:4px; color:#c9b8ff; cursor:pointer; transition:background 0.2s;">Play All</button>
+                    </div>
                     ${curves.slice(0, 8).map(c => {
                         const roleName = c.role || '';
                         const knownAs  = c.known_as || '';
@@ -8687,35 +8716,48 @@
             ` : '';
 
             // ── Whitespace analysis ──
-            const density     = whitespace.content_density;
-            const breathScore = whitespace.breathing_room_score;
+            // Support both old schema (content_density float) and new schema (content_density_pct number)
+            const contentDensityPct = whitespace.content_density_pct !== undefined ? whitespace.content_density_pct
+                : (whitespace.content_ratio_pct !== undefined ? whitespace.content_ratio_pct
+                : (whitespace.content_density !== undefined ? Math.round(whitespace.content_density * 100) : null));
+            const styledDensityPct = whitespace.styled_density_pct;
+            const trueWhitespacePct = whitespace.true_whitespace_pct !== undefined ? whitespace.true_whitespace_pct
+                : (whitespace.whitespace_ratio_pct !== undefined ? whitespace.whitespace_ratio_pct : null);
+            const wsScore     = whitespace.whitespace_score;
             const interp      = whitespace.interpretation || '';
-            const avgSpacing  = whitespace.avg_vertical_spacing;
-            const wsHTML = (density !== undefined || interp) ? `
+            const medianGap   = whitespace.median_vertical_gap_px;
+            const rhythmCons  = whitespace.vertical_rhythm_consistency;
+            const leafCount   = whitespace.leaf_elements_counted;
+            const wsFormula   = whitespace.formula || '';
+            const wsHTML = (contentDensityPct !== null || interp) ? `
                 <div style="margin-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.75rem;">
-                    <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Whitespace Analysis</div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                        ${density !== undefined ? `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em;">Whitespace Analysis</div>
+                        ${wsScore !== undefined ? `<div style="font-size: 0.85rem; font-weight: 700; color: ${wsScore >= 60 ? '#34c759' : wsScore >= 40 ? '#ff9f0a' : '#ff453a'};">${wsScore}/100</div>` : ''}
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                        ${contentDensityPct !== null ? `
                         <div style="background: rgba(255,255,255,0.04); border-radius: 6px; padding: 8px 10px;">
-                            <div style="font-size: 0.68rem; color: #666;">Content Density</div>
-                            <div style="font-size: 1rem; color: #fff; font-weight: 600;">${Math.round(density * 100)}%</div>
+                            <div style="font-size: 0.62rem; color: #666;">Content Fill</div>
+                            <div style="font-size: 1rem; color: #fff; font-weight: 600;">${contentDensityPct}%</div>
+                            ${leafCount ? `<div style="font-size: 0.58rem; color: #555;">${leafCount} elements</div>` : ''}
                         </div>` : ''}
-                        ${breathScore !== undefined ? `
+                        ${trueWhitespacePct !== null ? `
                         <div style="background: rgba(255,255,255,0.04); border-radius: 6px; padding: 8px 10px;">
-                            <div style="font-size: 0.68rem; color: #666;">Breathing Room</div>
-                            <div style="font-size: 1rem; color: #fff; font-weight: 600;">${breathScore}/10</div>
+                            <div style="font-size: 0.62rem; color: #666;">Whitespace</div>
+                            <div style="font-size: 1rem; color: #fff; font-weight: 600;">${trueWhitespacePct}%</div>
                         </div>` : ''}
-                        ${avgSpacing !== undefined ? `
+                        ${rhythmCons !== undefined ? `
                         <div style="background: rgba(255,255,255,0.04); border-radius: 6px; padding: 8px 10px;">
-                            <div style="font-size: 0.68rem; color: #666;">Avg Vertical Gap</div>
-                            <div style="font-size: 1rem; color: #fff; font-weight: 600;">${avgSpacing}px</div>
-                        </div>` : ''}
-                        ${interp ? `
-                        <div style="background: rgba(255,255,255,0.04); border-radius: 6px; padding: 8px 10px;">
-                            <div style="font-size: 0.68rem; color: #666;">Interpretation</div>
-                            <div style="font-size: 0.85rem; color: #0a84ff; font-weight: 600; text-transform: capitalize;">${interp}</div>
+                            <div style="font-size: 0.62rem; color: #666;">Rhythm</div>
+                            <div style="font-size: 1rem; color: #fff; font-weight: 600;">${rhythmCons}%</div>
                         </div>` : ''}
                     </div>
+                    <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
+                        ${medianGap !== undefined ? `<div style="font-size: 0.72rem; color: #888;">Median gap: <strong style="color:#ccc;">${medianGap}px</strong></div>` : ''}
+                        ${interp ? `<div style="font-size: 0.72rem; color: #0a84ff; font-weight: 500; text-transform: capitalize;">${interp}</div>` : ''}
+                    </div>
+                    ${wsFormula ? `<div style="font-size: 0.58rem; color: #444; margin-top: 6px; font-style: italic;">${wsFormula}</div>` : ''}
                 </div>
             ` : '';
 
@@ -9286,6 +9328,38 @@
         }
 
         // ── Build the regions array from hierarchy data ───────────────────
+        function deriveSemanticLabel(el, i) {
+            const tag = (el.tag || '').toLowerCase();
+            const text = (el.text || '').trim().substring(0, 25);
+            const cls = (el.className || '').toLowerCase();
+            const role = (el.role || '').toLowerCase();
+
+            // Tag-based semantic labels
+            if (/^h[1-6]$/.test(tag))       return tag.toUpperCase() + (text ? ': "' + text + '"' : '');
+            if (tag === 'nav' || role === 'navigation') return 'Navigation';
+            if (tag === 'img')              return 'Image' + (el.alt ? ': ' + el.alt.substring(0, 20) : '');
+            if (tag === 'button')           return 'Button' + (text ? ': "' + text + '"' : '');
+            if (tag === 'a' && (cls.includes('btn') || cls.includes('cta') || cls.includes('button')))
+                                            return 'Link button: "' + text + '"';
+            if (tag === 'video')            return 'Video player';
+            if (tag === 'audio')            return 'Audio player';
+            if (tag === 'header')           return 'Header';
+            if (tag === 'footer')           return 'Footer';
+            if (tag === 'main' || role === 'main') return 'Main content';
+            if (tag === 'section')          return 'Section' + (text ? ': "' + text + '"' : '');
+            if (tag === 'article')          return 'Article' + (text ? ': "' + text + '"' : '');
+            if (tag === 'form')             return 'Form';
+
+            // Size-based context
+            if (el.rect) {
+                if (el.rect.width > 600 && el.rect.height > 300) return 'Hero region';
+                if (el.rect.width > 400 && el.rect.height < 80)  return 'Banner';
+            }
+
+            // Fallback: rank + text preview
+            return '#' + (i + 1) + (text ? ' — "' + text + '"' : '');
+        }
+
         function buildRegions(hierarchy) {
             if (!hierarchy) return [];
             const regions = [];
@@ -9331,7 +9405,7 @@
                     // Rotate through a palette for ranked elements
                     const palette = ['#0a84ff','#bf5af2','#ff9f0a','#5ac8fa','#ff6b6b','#34c759','#ffd60a','#30d158'];
                     color = palette[i % palette.length];
-                    label = `#${i+1}`;
+                    label = deriveSemanticLabel(el, i);
                 }
 
                 const sel = el.id ? `#${el.id}` : (el.className ? `.${el.className.split(' ')[0]}` : el.tag);
@@ -10590,36 +10664,61 @@
                 }
             });
 
-            // Update count and show toggle button
+            // Update dimmed count indicator
             const countEl = document.getElementById('confHiddenCount');
             if (countEl) {
-                if (hidden > 0) {
-                    const grid = document.getElementById('metricsGrid');
-                    const isShowingAll = grid && grid.classList.contains('show-all-metrics');
-                    countEl.innerHTML = `<button onclick="toggleHiddenMetrics()" style="background:none; border:1px solid var(--border-default); border-radius:var(--radius-sm); padding:var(--space-1) var(--space-3); color:var(--text-tertiary); cursor:pointer; font-family:var(--font-body); font-size:var(--text-xs);">${hidden} hidden \u2014 ${isShowingAll ? 'Hide' : 'Show all'}</button>`;
-                } else {
-                    countEl.innerHTML = '';
-                }
+                countEl.innerHTML = hidden > 0
+                    ? `<span style="font-size:var(--text-xs); color:var(--text-tertiary);">${hidden} dimmed</span>`
+                    : '';
             }
+        }
 
-            // Auto-hide empty category sections
-            document.querySelectorAll('#metricsGrid .category-section').forEach(section => {
-                const sectionCards = section.querySelectorAll('.metric-card');
-                const allHidden = sectionCards.length > 0 && Array.from(sectionCards).every(c => c.classList.contains('conf-suppressed'));
-                const grid = document.getElementById('metricsGrid');
-                const showAll = grid && grid.classList.contains('show-all-metrics');
-                section.style.display = (allHidden && !showAll) ? 'none' : '';
+        // ── Motion Track Interaction (hover/tap to play) ──────────────
+        function initMotionTracks() {
+            document.addEventListener('mouseenter', function(e) {
+                const track = e.target.closest('.motion-track');
+                if (track && !track.classList.contains('motion-track--active')) {
+                    triggerMotionTrack(track);
+                }
+            }, true);
+            document.addEventListener('touchstart', function(e) {
+                const track = e.target.closest('.motion-track');
+                if (track && !track.classList.contains('motion-track--active')) {
+                    triggerMotionTrack(track);
+                }
+            }, { passive: true });
+        }
+
+        function triggerMotionTrack(track) {
+            track.classList.remove('motion-track--active');
+            // Force reflow to restart animation
+            void track.offsetWidth;
+            track.classList.add('motion-track--active');
+            const dot = track.querySelector('.motion-track-dot');
+            if (dot) {
+                dot.addEventListener('animationend', function onEnd() {
+                    dot.removeEventListener('animationend', onEnd);
+                    // Brief pause at end position, then reset
+                    setTimeout(function() {
+                        track.classList.remove('motion-track--active');
+                    }, 400);
+                });
+            }
+        }
+
+        function playAllMotionTracks(btn) {
+            const card = btn.closest('.metric-card') || btn.closest('.metric-body')?.parentElement;
+            if (!card) return;
+            const tracks = card.querySelectorAll('.motion-track');
+            tracks.forEach(function(track, i) {
+                setTimeout(function() {
+                    triggerMotionTrack(track);
+                }, i * 200);
             });
         }
 
-        function toggleHiddenMetrics() {
-            const grid = document.getElementById('metricsGrid');
-            if (!grid) return;
-            grid.classList.toggle('show-all-metrics');
-            // Re-apply to update button text and category visibility
-            const slider = document.getElementById('confThresholdSlider');
-            if (slider) applyConfidenceFilter(parseInt(slider.value, 10));
-        }
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', initMotionTracks);
 
         function toggleExpandAll() {
             const cards = document.querySelectorAll('#metricsGrid .metric-card');

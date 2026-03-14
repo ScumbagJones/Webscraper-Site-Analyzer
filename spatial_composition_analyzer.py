@@ -53,6 +53,7 @@ class SpatialCompositionAnalyzer:
 
         # Extract viewport-aware spatial data
         spatial_data = await self._extract_spatial_data(page)
+        print(f"   🗺️  Spatial data: {spatial_data.get('totalElements', '?')} elements extracted")
 
         # Analyze page structure patterns
         page_structure = await self._analyze_page_structure(spatial_data)
@@ -151,6 +152,10 @@ class SpatialCompositionAnalyzer:
                         gridTemplateColumns: styles.gridTemplateColumns,
                         gridTemplateRows: styles.gridTemplateRows,
                         textAlign: styles.textAlign,
+                        backgroundColor: styles.backgroundColor,
+                        backgroundImage: styles.backgroundImage,
+                        borderWidth: parseFloat(styles.borderTopWidth) || 0,
+                        boxShadow: styles.boxShadow,
                         margin: {
                             top: parseFloat(styles.marginTop) || 0,
                             bottom: parseFloat(styles.marginBottom) || 0,
@@ -183,11 +188,16 @@ class SpatialCompositionAnalyzer:
                 }
             }
 
+            // Page background color for whitespace contrast calculations
+            const bodyStyles = window.getComputedStyle(document.body);
+            const pageBgColor = bodyStyles.backgroundColor || 'rgb(255,255,255)';
+
             return {
                 viewport,
                 elements,
                 containers,
-                totalElements: elements.length
+                totalElements: elements.length,
+                pageBgColor
             };
         }''')
 
@@ -476,47 +486,224 @@ class SpatialCompositionAnalyzer:
             'confidence': 75
         }
 
+    # Tags that carry visible payload (leaf content — what humans see)
+    _CONTENT_TAGS = frozenset({
+        'img', 'video', 'canvas', 'svg', 'picture', 'iframe',
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'button', 'input', 'select', 'textarea',
+        'figcaption', 'label', 'blockquote', 'code', 'pre',
+        'li', 'td', 'th', 'dt', 'dd',
+    })
+
+    # Structural wrappers (not visual content by default)
+    _CONTAINER_TAGS = frozenset({
+        'div', 'section', 'article', 'main', 'aside', 'header',
+        'footer', 'nav', 'ul', 'ol', 'form', 'fieldset', 'table',
+        'thead', 'tbody', 'tr', 'dl', 'figure', 'details',
+    })
+
+    @classmethod
+    def _is_leaf_content(cls, el: Dict, vp_area: float) -> bool:
+        """Classify element as visible leaf content vs structural container."""
+        tag = el.get('tag', '')
+        # Media elements are always content
+        if tag in ('img', 'video', 'canvas', 'iframe', 'picture', 'svg'):
+            return True
+        # Block-level content tags
+        if tag in cls._CONTENT_TAGS:
+            return True
+        # For containers: treat as visual content only if they have a visible
+        # background AND are small enough (< 25% viewport) to be a "card"
+        if tag in cls._CONTAINER_TAGS:
+            styles = el.get('styles', {})
+            bg = styles.get('backgroundColor', '')
+            bg_img = styles.get('backgroundImage', '')
+            border = styles.get('borderWidth', 0)
+            shadow = styles.get('boxShadow', '')
+            has_visual = (
+                (bg_img and bg_img != 'none')
+                or (border and border > 0)
+                or (shadow and shadow != 'none')
+                or (bg and bg not in ('rgba(0, 0, 0, 0)', 'transparent', ''))
+            )
+            r = el.get('rect', {})
+            el_area = r.get('width', 0) * r.get('height', 0)
+            if has_visual and el_area < vp_area * 0.25:
+                return True
+        return False
+
+    @classmethod
+    def _has_visual_background(cls, el: Dict, page_bg: str = '') -> bool:
+        """Check if element has a VISUALLY DISTINCT background.
+        Filters out containers that merely inherit or match the page background.
+        Only counts elements with images, borders, shadows, or high-contrast bg."""
+        styles = el.get('styles', {})
+        bg = styles.get('backgroundColor', '')
+        bg_img = styles.get('backgroundImage', '')
+        border = styles.get('borderWidth', 0)
+        shadow = styles.get('boxShadow', '')
+
+        if bg_img and bg_img != 'none':
+            return True
+        if border and border > 0:
+            return True
+        if shadow and shadow != 'none' and shadow != '0px 0px 0px 0px':
+            return True
+        # Background color: only count if significantly different from page bg
+        if bg and bg not in ('rgba(0, 0, 0, 0)', 'transparent', ''):
+            if bg != page_bg:
+                # Parse both colors and check if they're truly different
+                # (not just minor opacity/rounding differences)
+                import re
+                def parse_rgb(s):
+                    m = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)', s or '')
+                    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+                c1 = parse_rgb(bg)
+                c2 = parse_rgb(page_bg)
+                if c1 and c2:
+                    # Only count if color difference is perceptible (> 30 in any channel)
+                    diff = max(abs(c1[0]-c2[0]), abs(c1[1]-c2[1]), abs(c1[2]-c2[2]))
+                    if diff > 30:
+                        return True
+                elif c1:
+                    return True  # page_bg not parseable, assume different
+        return False
+
     def _analyze_whitespace(self, spatial_data: Dict) -> Dict:
         """
-        Analyze whitespace and density
+        Analyze whitespace using leaf-node-only grid sampling.
 
-        Metrics:
-        - Content density (% of viewport filled)
-        - Average gaps between elements
-        - Breathing room score
+        Key insight: only paint CONTENT elements (img, p, h1, button, etc.) onto
+        the grid — not structural containers (div, section). This eliminates the
+        overlap problem where nested containers inflate content ratios.
+
+        Three defensible metrics:
+        1. Content density — % of viewport covered by leaf content elements
+        2. Styled density — % covered by content + visually-styled containers
+        3. Vertical rhythm — coefficient of variation of inter-element gaps
+
+        Composite: 50% ratio quality + 25% rhythm + 25% gap quality
         """
+        import statistics
+
         elements = spatial_data['elements']
         viewport = spatial_data['viewport']
+        page_bg = spatial_data.get('pageBgColor', '')
+        vp_w = viewport['width']
+        vp_h = viewport['height']
+        vp_area = vp_w * vp_h
 
-        # Calculate total content area
-        total_content_area = sum(el['rect']['width'] * el['rect']['height'] for el in elements[:50])
-        viewport_area = viewport['width'] * viewport['height']
-        density = (total_content_area / viewport_area) * 100 if viewport_area > 0 else 0
+        # ── 1. Classify elements ──
+        # No element limit — need to scan full DOM since sites like Stripe
+        # have hundreds of off-screen nav elements before page content
+        leaf_content = [el for el in elements if self._is_leaf_content(el, vp_area)]
+        # For visual_bg check, use a set for fast exclusion
+        leaf_set = set(id(el) for el in leaf_content)
+        visual_bg = [el for el in elements
+                     if id(el) not in leaf_set
+                     and self._has_visual_background(el, page_bg)]
 
-        # Calculate average margins
-        margins = [el['styles']['margin']['top'] + el['styles']['margin']['bottom'] for el in elements[:30]]
-        avg_vertical_margin = sum(margins) / len(margins) if margins else 0
+        # ── 2. Grid sampling: leaf content only ──
+        grid_w, grid_h = 100, 100
+        cell_w = max(1, vp_w / grid_w)
+        cell_h = max(1, vp_h / grid_h)
 
-        # Breathing room score (higher margins = more breathing room)
-        breathing_room = min(100, avg_vertical_margin * 2)
+        def paint_grid(els):
+            occupied = set()
+            for el in els:
+                r = el['rect']
+                if r['width'] <= 0 or r['height'] <= 0:
+                    continue
+                if r['top'] >= vp_h:  # completely below fold
+                    continue
+                if r['top'] + r['height'] <= 0:  # completely above viewport
+                    continue
+                if r['left'] + r['width'] <= 0:  # completely left of viewport
+                    continue
+                x0 = max(0, int(r['left'] / cell_w))
+                y0 = max(0, int(r['top'] / cell_h))
+                x1 = min(grid_w, int((r['left'] + r['width']) / cell_w) + 1)
+                y1 = min(grid_h, int((r['top'] + r['height']) / cell_h) + 1)
+                # Ensure valid range
+                x1 = max(x0, x1)
+                y1 = max(y0, y1)
+                for y in range(y0, y1):
+                    for x in range(x0, x1):
+                        occupied.add((x, y))
+            return occupied
+
+        content_cells = paint_grid(leaf_content)
+        bg_cells = paint_grid(visual_bg)
+        total_cells = grid_w * grid_h
+
+        # Log summary
+        above_fold_count = sum(1 for el in leaf_content if el['rect']['top'] + el['rect']['height'] > 0 and el['rect']['top'] < vp_h)
+        print(f"   📐 Whitespace: {len(leaf_content)} leaf elements ({above_fold_count} above-fold), {len(content_cells)} grid cells filled")
+
+        content_density = len(content_cells) / total_cells if total_cells > 0 else 0
+        styled_density = len(content_cells | bg_cells) / total_cells if total_cells > 0 else 0
+        # Whitespace = viewport NOT covered by leaf content (backgrounds are irrelevant)
+        whitespace_ratio = 1 - content_density
+
+        # ── 3. Vertical rhythm: gap consistency between leaf content elements ──
+        block_els = sorted(
+            [el for el in leaf_content if el['rect']['height'] > 10 and el['rect']['width'] > 20],
+            key=lambda e: e['rect']['top']
+        )
+        gaps = []
+        for i in range(1, len(block_els)):
+            gap = block_els[i]['rect']['top'] - (block_els[i-1]['rect']['top'] + block_els[i-1]['rect']['height'])
+            if gap > 0:
+                gaps.append(gap)
+
+        if gaps and len(gaps) >= 3:
+            gap_mean = statistics.mean(gaps)
+            gap_stdev = statistics.stdev(gaps)
+            cv = gap_stdev / gap_mean if gap_mean > 0 else 1
+            rhythm_consistency = max(0, 1 - min(1, cv))
+        else:
+            gap_mean = 0
+            rhythm_consistency = 0
+
+        # ── 4. Median vertical gap ──
+        median_gap = statistics.median(gaps) if gaps else 0
+
+        # ── 5. Composite whitespace score (0-100) ──
+        # Ratio score: peaks at 45% content density (well-designed pages land 35-55%)
+        ratio_score = max(0, min(100, 100 - abs(content_density - 0.45) * 200))
+        rhythm_score = rhythm_consistency * 100
+        gap_score = min(100, (median_gap / 16) * 33) if median_gap > 0 else 0
+
+        whitespace_score = round(ratio_score * 0.50 + rhythm_score * 0.25 + gap_score * 0.25)
 
         return {
-            'content_density_pct': round(density, 1),
-            'average_vertical_spacing': round(avg_vertical_margin),
-            'breathing_room_score': round(breathing_room),
-            'interpretation': self._interpret_density(density)
+            'content_density_pct': round(content_density * 100, 1),
+            'styled_density_pct': round(styled_density * 100, 1),
+            'true_whitespace_pct': round(whitespace_ratio * 100, 1),
+            'content_ratio_pct': round(content_density * 100, 1),  # backward compat alias
+            'whitespace_ratio_pct': round(whitespace_ratio * 100, 1),  # backward compat alias
+            'whitespace_score': whitespace_score,
+            'vertical_rhythm_consistency': round(rhythm_consistency * 100),
+            'median_vertical_gap_px': round(median_gap),
+            'gap_count': len(gaps),
+            'leaf_elements_counted': len(leaf_content),
+            'visual_bg_elements': len(visual_bg),
+            'interpretation': self._interpret_whitespace(whitespace_score),
+            'formula': 'Leaf-node grid (50%) + rhythm CV (25%) + median gap/16px (25%). Only content tags (img, p, h1-h6, button, etc.) painted — containers excluded.'
         }
 
-    def _interpret_density(self, density: float) -> str:
-        """Interpret content density"""
-        if density > 80:
-            return 'Dense (text-heavy or crowded)'
-        elif density > 50:
-            return 'Balanced (moderate spacing)'
-        elif density > 30:
-            return 'Spacious (generous whitespace)'
+    def _interpret_whitespace(self, score: float) -> str:
+        """Interpret composite whitespace score"""
+        if score >= 80:
+            return 'Excellent — well-balanced spacing with consistent rhythm'
+        elif score >= 60:
+            return 'Good — reasonable spacing, some inconsistency'
+        elif score >= 40:
+            return 'Moderate — uneven spacing or density'
+        elif score >= 20:
+            return 'Crowded — limited whitespace, irregular rhythm'
         else:
-            return 'Minimal (sparse content)'
+            return 'Dense — very little breathing room'
 
     def _analyze_above_fold(self, spatial_data: Dict) -> Dict:
         """
@@ -642,26 +829,46 @@ class SpatialCompositionAnalyzer:
 
     def _calculate_confidence(self, spatial_data: Dict) -> int:
         """
-        Calculate overall confidence in spatial analysis
+        Graded confidence based on evidence quality, not boolean flags.
 
-        Based on:
-        - Number of elements analyzed
-        - Presence of semantic landmarks
-        - Data completeness
+        Components (max 95):
+        - Element coverage: up to +25 (graded by count, 200 elements = max)
+        - Semantic landmarks: up to +25 (+5 per unique landmark type found)
+        - Layout containers: up to +20 (graded by count, 60 containers = max)
+        - Above-fold content: +10 if present, -15 if missing
+        - Base: 30
         """
-        element_count = len(spatial_data['elements'])
-        has_landmarks = any(el['semantic']['isLandmark'] for el in spatial_data['elements'])
-        has_containers = len(spatial_data['containers']) > 0
+        elements = spatial_data['elements']
+        containers = spatial_data['containers']
+        element_count = len(elements)
 
-        base_confidence = 50
-        if element_count > 20:
-            base_confidence += 20
-        if has_landmarks:
-            base_confidence += 15
-        if has_containers:
-            base_confidence += 15
+        base = 30
 
-        return min(base_confidence, 95)
+        # Element coverage: graded (0-25)
+        base += min(25, element_count / 8)
+
+        # Semantic landmarks: +5 per unique type found (header, nav, main, footer, article, section)
+        landmark_tags = {'header', 'nav', 'main', 'footer', 'article', 'section'}
+        found_landmarks = set()
+        for el in elements:
+            if el.get('semantic', {}).get('isLandmark'):
+                found_landmarks.add(el.get('tag', ''))
+            elif el.get('tag', '') in landmark_tags:
+                found_landmarks.add(el['tag'])
+        base += min(25, len(found_landmarks) * 5)
+
+        # Layout containers: graded by count (0-20)
+        container_count = len(containers)
+        base += min(20, container_count / 3)
+
+        # Above-fold penalty/bonus
+        has_above_fold = any(el.get('aboveFold') for el in elements)
+        if has_above_fold:
+            base += 10
+        else:
+            base -= 15
+
+        return min(95, max(10, round(base)))
 
 
 # Integration test

@@ -58,6 +58,42 @@ class VisualHierarchyAnalyzer:
                 height: window.innerHeight
             };
 
+            // ── Leaf content detection: what humans actually SEE ──
+            const CONTENT_TAGS = new Set([
+                'img', 'video', 'canvas', 'svg', 'picture', 'iframe',
+                'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                'button', 'input', 'select', 'textarea',
+                'figcaption', 'label', 'blockquote', 'code', 'pre',
+                'li', 'td', 'th',
+            ]);
+            const CONTAINER_TAGS = new Set([
+                'html', 'body', 'div', 'section', 'article', 'main', 'aside', 'header',
+                'footer', 'nav', 'ul', 'ol', 'form', 'fieldset', 'table',
+                'thead', 'tbody', 'tr', 'dl', 'figure', 'details',
+            ]);
+
+            // Get page background for contrast calculations
+            const bodyStyles = window.getComputedStyle(document.body);
+            const pageBg = bodyStyles.backgroundColor || 'rgb(255,255,255)';
+
+            function parseRGB(str) {
+                const m = (str || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                return m ? { r: +m[1], g: +m[2], b: +m[3] } : { r: 255, g: 255, b: 255 };
+            }
+            function relativeLuminance(c) {
+                const sR = c.r / 255, sG = c.g / 255, sB = c.b / 255;
+                const R = sR <= 0.03928 ? sR / 12.92 : Math.pow((sR + 0.055) / 1.055, 2.4);
+                const G = sG <= 0.03928 ? sG / 12.92 : Math.pow((sG + 0.055) / 1.055, 2.4);
+                const B = sB <= 0.03928 ? sB / 12.92 : Math.pow((sB + 0.055) / 1.055, 2.4);
+                return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+            }
+            function saturation(c) {
+                const max = Math.max(c.r, c.g, c.b) / 255;
+                const min = Math.min(c.r, c.g, c.b) / 255;
+                return max === 0 ? 0 : (max - min) / max;
+            }
+            const pageBgLum = relativeLuminance(parseRGB(pageBg));
+
             // Calculate visual weight for each element
             const weightedElements = elements.map(el => {
                 const rect = el.getBoundingClientRect();
@@ -68,68 +104,78 @@ class VisualHierarchyAnalyzer:
                     return null;
                 }
 
-                // Calculate visual weight score
-                const size = rect.width * rect.height;
                 const aboveFold = rect.top >= 0 && rect.top < viewport.height;
                 const zIndex = parseInt(styles.zIndex) || 0;
                 const fontSize = parseFloat(styles.fontSize) || 0;
-
-                // Color contrast (simplified)
+                const fontWeight = parseInt(styles.fontWeight) || 400;
                 const color = styles.color;
                 const bgColor = styles.backgroundColor;
-
-                // Visual weight: size and font are primary signals.
-                // z-index is a tiebreaker, not a multiplier — capped and scaled
-                // by area so tiny overlays (arrows at z999) don't drown real content.
                 const role = el.getAttribute('role');
                 const ariaLabel = el.getAttribute('aria-label');
                 const tagName = el.tagName.toLowerCase();
 
-                // Nav/header structural elements: cap sizeScore to prevent
-                // full-width elements from dominating the visual weight map.
+                // ── Leaf vs Container classification ──
+                const trimmedText = (el.textContent || '').trim();
+                const isLeafContent = CONTENT_TAGS.has(tagName)
+                    || (tagName === 'a' && trimmedText.length > 0 && trimmedText.length < 100);
+                const isContainer = CONTAINER_TAGS.has(tagName);
+                const textLen = (el.textContent || '').length;
+                const isLikelyWrapper = isContainer && textLen > 200;
+
+                // Content bonus/penalty: leaf content ranks higher than containers
+                const contentBonus = isLeafContent ? 40 : (isLikelyWrapper ? -60 : 0);
+
+                // ── Color contrast against page background ──
+                const elBg = parseRGB(bgColor);
+                const elBgLum = relativeLuminance(elBg);
+                const lumDelta = Math.abs(elBgLum - pageBgLum);
+                const bgSat = saturation(elBg);
+                const contrastScore = (lumDelta * 40) + (bgSat > 0.5 ? 30 : 0);
+
+                // ── Bold text bonus ──
+                const boldBonus = fontWeight >= 700 ? 20 : 0;
+
+                // Nav/header structural elements: cap sizeScore
                 const isNavStructural = tagName === 'nav' || role === 'navigation' || role === 'banner'
                     || (tagName === 'header' && rect.width > viewport.width * 0.8);
-                const sizeScore = isNavStructural ? Math.min(size * 0.0001, 5.0) : size * 0.0001;
-                const foldBonus = aboveFold ? 50 : 0;                     // above-fold lift
-                const fontScore = fontSize * 3;                           // text size matters
-                const zBonus = zIndex > 0 ? Math.min(zIndex, 50) * (size * 0.0005) : 0;  // z-index scaled by size, capped at 50
+                const isViewportContainer = rect.width >= viewport.width * 0.85
+                    && rect.height >= viewport.height * 0.85
+                    && CONTAINER_TAGS.has(tagName);
+                const size = rect.width * rect.height;
+                const sizeScore = (isNavStructural || isViewportContainer)
+                    ? Math.min(size * 0.0001, 5.0) : size * 0.0001;
 
-                // Semantic importance bonus
+                const foldBonus = aboveFold ? 50 : 0;
+                const fontScore = fontSize * 2;  // slightly reduced — contrast matters more
+                const zBonus = zIndex > 0 ? Math.min(zIndex, 30) : 0;
+
+                // Semantic importance bonus (reduced — let contrast/content do the work)
                 let semanticBonus = 0;
-
-                // Navigation elements — structural, not the visual focus
                 if (tagName === 'nav' || role === 'navigation' || role === 'banner') {
-                    semanticBonus = 200;  // Reduced from 500 — nav is structural, not hero
-                }
-                // Header elements
-                else if (tagName === 'header' && rect.top < viewport.height * 0.2) {
-                    semanticBonus = 250;  // Reduced from 400
-                }
-                // Main content area
-                else if (tagName === 'main' || role === 'main') {
-                    semanticBonus = 150;  // Increased from 100
-                }
-                // Article headings (important text)
-                else if (tagName.match(/^h[1-3]$/)) {
-                    semanticBonus = 120;  // Increased from 80
-                }
-                // Footer (visible but lower priority)
-                else if (tagName === 'footer' || role === 'contentinfo') {
-                    semanticBonus = 50;  // Increased from 30
+                    semanticBonus = 100;
+                } else if (tagName === 'header' && rect.top < viewport.height * 0.2) {
+                    semanticBonus = 120;
+                } else if (tagName === 'main' || role === 'main') {
+                    semanticBonus = 80;
+                } else if (tagName.match(/^h[1-3]$/)) {
+                    semanticBonus = 100;
+                } else if (tagName === 'footer' || role === 'contentinfo') {
+                    semanticBonus = 30;
                 }
 
-                const weight = sizeScore + foldBonus + fontScore + zBonus + semanticBonus;
+                const weight = sizeScore + foldBonus + fontScore + boldBonus + contrastScore + contentBonus + zBonus + semanticBonus;
 
-                // SVG elements have className as SVGAnimatedString, not a plain string
                 const safeClassName = (typeof el.className === 'string') ? el.className : (el.className?.baseVal || '');
 
                 return {
-                    tag: el.tagName.toLowerCase(),
+                    tag: tagName,
                     text: el.textContent?.substring(0, 100) || '',
+                    alt: el.getAttribute('alt') || '',
                     className: safeClassName,
                     id: el.id,
                     weight: weight,
                     isNavStructural: isNavStructural,
+                    isLeafContent: isLeafContent,
                     rect: {
                         top: rect.top,
                         left: rect.left,
@@ -147,11 +193,44 @@ class VisualHierarchyAnalyzer:
                 };
             }).filter(el => el !== null);
 
-            // Sort by visual weight, excluding nav/header structural elements
-            // from the ranked visual hierarchy (they are shown separately)
-            const sorted = weightedElements
+            // ── Non-Maximum Suppression (NMS) ──
+            // Removes nested elements that share nearly identical bounding boxes.
+            // Keeps the highest-scored element when overlap exceeds threshold.
+            function computeOverlap(a, b) {
+                const xOverlap = Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left));
+                const yOverlap = Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+                const intersection = xOverlap * yOverlap;
+                const smallerArea = Math.min(a.width * a.height, b.width * b.height);
+                return smallerArea > 0 ? intersection / smallerArea : 0;
+            }
+
+            // Sort by weight descending, filter nav structural
+            const candidates = weightedElements
                 .filter(el => !el.isNavStructural)
                 .sort((a, b) => b.weight - a.weight);
+
+            // NMS pass: suppress overlapping lower-scored elements
+            const kept = [];
+            for (const el of candidates) {
+                let suppressed = false;
+                for (const existing of kept) {
+                    if (computeOverlap(el.rect, existing.rect) > 0.7) {
+                        suppressed = true;
+                        break;
+                    }
+                }
+                if (!suppressed) kept.push(el);
+            }
+
+            // Category diversity cap: max 3 per tag type in top results
+            const tagCounts = {};
+            const sorted = [];
+            for (const el of kept) {
+                const tc = tagCounts[el.tag] || 0;
+                if (tc >= 3) continue;
+                tagCounts[el.tag] = tc + 1;
+                sorted.push(el);
+            }
 
             // Detect hero section (largest heading + nearby image)
             const heroHeading = sorted.find(el =>
