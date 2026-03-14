@@ -1928,77 +1928,7 @@
         }
 
         /* ── Z-Index Layers ── */
-        .z-index-layers-list {
-            margin-top: var(--space-4);
-        }
-
-        .z-index-layer {
-            margin: var(--space-2) 0;
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-sm);
-            overflow: hidden;
-            cursor: pointer;
-            transition: all var(--duration-fast) var(--ease-out);
-        }
-
-        .z-index-layer:hover {
-            border-color: var(--border-default);
-            background: rgba(255,255,255,0.02);
-        }
-
-        .layer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: var(--space-3);
-            background: rgba(255,255,255,0.03);
-        }
-
-        .layer-name {
-            font-family: var(--font-mono);
-            font-weight: 600;
-            color: var(--text-primary);
-            font-size: var(--text-base);
-        }
-
-        .layer-count {
-            font-size: var(--text-sm);
-            color: var(--text-tertiary);
-        }
-
-        .expand-icon {
-            font-size: var(--text-xs);
-            color: var(--text-tertiary);
-            transition: transform var(--duration-fast) var(--ease-out);
-        }
-
-        .layer-details {
-            padding: var(--space-3);
-            background: rgba(0,0,0,0.2);
-        }
-
-        .layer-elements {
-            display: flex;
-            flex-wrap: wrap;
-            gap: var(--space-2);
-        }
-
-        .element-tag {
-            display: inline-block;
-            margin: 2px;
-            padding: 3px 8px;
-            background: var(--surface-3);
-            border-radius: var(--radius-sm);
-            font-size: var(--text-xs);
-            font-family: var(--font-mono);
-        }
-
-        .more-elements {
-            font-size: var(--text-xs);
-            color: var(--text-tertiary);
-            font-style: italic;
-            padding: 3px 8px;
-        }
+        /* Old z-index layer styles removed — Page Layers card uses inline styles */
 
         /* ── Technical Term Tooltips ── */
         .tech-term {
@@ -4172,7 +4102,7 @@
                         { key: 'accessibility_tree', icon: '🌐', title: 'Semantic Structure' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
-                        { key: 'z_index_stack', icon: '📚', title: 'Z-Index Stack' },
+                        { key: 'z_index_stack', icon: '📚', title: 'Page Layers' },
                         { key: 'dom_depth', icon: '🌳', title: 'DOM Depth' },
                         { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' },
                         { key: 'site_topology', icon: '🗺️', title: 'Site Topology' }
@@ -4903,7 +4833,7 @@
                         { key: 'accessibility_tree', icon: '🌐', title: 'Semantic Structure' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
-                        { key: 'z_index_stack', icon: '📚', title: 'Z-Index Stack' },
+                        { key: 'z_index_stack', icon: '📚', title: 'Page Layers' },
                         { key: 'dom_depth', icon: '🌳', title: 'DOM Depth' },
                         { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' },
                         { key: 'site_topology', icon: '🗺️', title: 'Site Topology' }
@@ -5097,7 +5027,7 @@
                 }
             },
             'z_index_stack': {
-                title: 'Z-Index Stacking',
+                title: 'Page Layers',
                 what: 'CSS z-index values controlling which elements appear on top',
                 whyMatters: 'Proper stacking prevents visual bugs (modals behind content)',
                 note: 'Filtering: Showing meaningful layers (1-500), hiding framework noise (500+)',
@@ -5318,7 +5248,7 @@
                 bodyHTML = createBreakpointsCard(icon, title, data, confidenceClass);
             } else if (title === 'Shadow System') {
                 bodyHTML = createShadowCard(icon, title, data, confidenceClass);
-            } else if (title === 'Z-Index Stack') {
+            } else if (title === 'Page Layers') {
                 bodyHTML = createZIndexCard(icon, title, data, confidenceClass);
             } else if (title === 'Border Radius') {
                 bodyHTML = createBorderRadiusCard(icon, title, data, confidenceClass);
@@ -5493,7 +5423,7 @@
                     if (count === 0) return 'No breakpoints detected';
                     return `Adapts to ${count} screen ${count === 1 ? 'size' : 'sizes'}`;
                 }
-                case 'Z-Index Stack': {
+                case 'Page Layers': {
                     // layers can be an object (key→{z_index, count, elements}) or array
                     const layersRaw = data.layers || data.details?.layers || {};
                     const layerEntries = Array.isArray(layersRaw) ? layersRaw : Object.values(layersRaw);
@@ -6304,243 +6234,205 @@
             const visibleElements = data.visible_elements || totalElements;
             const ghostElements = data.ghost_elements || 0;
 
-            // Separate visible layers from ghost-only layers
             const layerEntries = Object.entries(layers);
             const visibleLayers = layerEntries.filter(([_, info]) => (info.visible_count || info.count) > 0 || !info.ghost_count);
             const ghostLayers = layerEntries.filter(([_, info]) => info.ghost_count > 0 && (info.visible_count === 0));
             const layerCount = visibleLayers.length;
-
-            // Count interactive elements across all layers
             const totalInteractive = layerEntries.reduce((sum, [_, info]) => sum + (info.interactive_count || 0), 0);
 
-            // Summary stats bar
-            const statsHTML = `
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0;">
-                    <span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.6rem; background: rgba(10, 132, 255, 0.15); border-radius: 20px; font-size: 0.75rem; color: #4db8ff;">
-                        👁 ${visibleElements} visible
-                    </span>
-                    ${totalInteractive > 0 ? `
-                        <span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.6rem; background: rgba(52, 199, 89, 0.15); border-radius: 20px; font-size: 0.75rem; color: #34c759;">
-                            🖱 ${totalInteractive} interactive
-                        </span>
-                    ` : ''}
-                    ${ghostElements > 0 ? `
-                        <span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.6rem; background: rgba(255, 255, 255, 0.06); border-radius: 20px; font-size: 0.75rem; color: #666;">
-                            👻 ${ghostElements} ghost (filtered)
-                        </span>
-                    ` : ''}
+            // Health assessment
+            const health = data.health || {};
+            const healthLevel = health.level || 'Unknown';
+
+            // Purpose icons for layer panel
+            const purposeIcon = (purpose) => {
+                const p = (purpose || '').toLowerCase();
+                if (p.includes('navigation') || p.includes('nav'))   return '🧭';
+                if (p.includes('modal') || p.includes('dialog'))     return '💬';
+                if (p.includes('overlay'))                           return '🎭';
+                if (p.includes('tooltip') || p.includes('popover'))  return '💡';
+                if (p.includes('dropdown') || p.includes('menu'))    return '📋';
+                if (p.includes('header') || p.includes('banner'))    return '📌';
+                if (p.includes('media') || p.includes('player'))     return '🎵';
+                if (p.includes('fixed') || p.includes('sticky'))     return '📎';
+                if (p.includes('toast') || p.includes('notification')) return '🔔';
+                return '▪';
+            };
+
+            // Layer color by role (softer, design-tool palette)
+            const layerColor = (name) => {
+                if (name.startsWith('Extreme'))  return { bg: 'rgba(255,82,82,0.12)',  border: '#ff5252',  text: '#ff8a80' };
+                if (name.startsWith('Critical')) return { bg: 'rgba(255,171,64,0.12)',  border: '#ffab40',  text: '#ffd180' };
+                if (name.startsWith('Overlay'))  return { bg: 'rgba(186,104,255,0.12)', border: '#ba68ff',  text: '#d1a3ff' };
+                if (name.startsWith('Elevated')) return { bg: 'rgba(68,138,255,0.12)',  border: '#448aff',  text: '#82b1ff' };
+                if (name.startsWith('Base'))     return { bg: 'rgba(105,240,174,0.10)', border: '#69f0ae',  text: '#b9f6ca' };
+                if (name.startsWith('Below'))    return { bg: 'rgba(158,158,158,0.08)', border: '#9e9e9e',  text: '#bdbdbd' };
+                return { bg: 'rgba(68,138,255,0.12)', border: '#448aff', text: '#82b1ff' };
+            };
+
+            // Sort layers top-to-bottom (highest z first — like Photoshop)
+            const sortedLayers = [...visibleLayers].sort((a, b) => {
+                const zA = a[1].z_max || a[1].z_index || 0;
+                const zB = b[1].z_max || b[1].z_index || 0;
+                return zB - zA;
+            });
+
+            // Health summary line
+            const healthEmoji = healthLevel === 'Clean' ? '✓' : healthLevel === 'Complex' ? '⚠' : healthLevel === 'Chaotic' ? '✗' : '?';
+            const healthColor = { 'Clean': '#69f0ae', 'Complex': '#ffab40', 'Chaotic': '#ff5252', 'Unknown': '#666' }[healthLevel] || '#666';
+            const healthSummary = health.detail || (healthLevel === 'Clean' ? 'Well-organized layer structure' : healthLevel === 'Complex' ? 'Multiple layering levels — review for simplification' : healthLevel === 'Chaotic' ? 'Tangled layers — likely z-index conflicts' : '');
+
+            // Header area: layer count + health
+            const headerHTML = `
+                <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1rem;">
+                    <div>
+                        <div style="font-size: 2.2rem; font-weight: 700; color: ${healthColor}; line-height: 1;">${layerCount}</div>
+                        <div style="font-size: 0.78rem; color: #888; margin-top: 0.2rem;">layer group${layerCount !== 1 ? 's' : ''}</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.7rem; background: rgba(255,255,255,0.04); border-radius: 20px;">
+                        <span style="color: ${healthColor}; font-size: 0.82rem;">${healthEmoji}</span>
+                        <span style="font-size: 0.75rem; color: ${healthColor}; font-weight: 600;">${healthLevel}</span>
+                    </div>
                 </div>
+                ${healthSummary ? `<div style="font-size: 0.75rem; color: #777; margin-bottom: 1rem; line-height: 1.4;">${healthSummary}</div>` : ''}
             `;
 
-            // Visual stack — color-coded by tier
-            const getTierColor = (name) => {
-                if (name.startsWith('Extreme'))  return { r: 255, g: 69, b: 58 };     // red
-                if (name.startsWith('Critical')) return { r: 255, g: 159, b: 10 };     // orange
-                if (name.startsWith('Overlay'))  return { r: 175, g: 82, b: 222 };     // purple
-                if (name.startsWith('Elevated')) return { r: 10, g: 132, b: 255 };     // blue
-                if (name.startsWith('Base'))     return { r: 52, g: 199, b: 89 };      // green
-                if (name.startsWith('Below'))    return { r: 100, g: 100, b: 100 };    // gray
-                if (name.startsWith('Ghost'))    return { r: 80, g: 80, b: 80 };       // dark gray
-                return { r: 10, g: 132, b: 255 };
-            };
-            const getLayerColor = getTierColor;
+            // Layer panel — Photoshop-style list
+            const layerPanelId = 'lp-' + Math.random().toString(36).slice(2, 8);
+            const layerPanelHTML = sortedLayers.map(([name, info], i) => {
+                const tierName = name.includes(': ') ? name.split(': ')[0] : name;
+                const purpose = name.includes(': ') ? name.split(': ').slice(1).join(': ') : '';
+                const lc = layerColor(name);
+                const count = info.visible_count || info.count || 0;
+                const interCount = info.interactive_count || 0;
+                const elements = (info.elements || []).filter(el => el.isVisible !== false);
+                const topEls = elements.slice(0, 4);
+                const detailId = layerPanelId + '-d' + i;
 
-            // Build vertical tier stack — bottom-to-top
-            const sortedLayers = [...visibleLayers].sort((a, b) => {
-                const zA = a[1].z_index || 0;
-                const zB = b[1].z_index || 0;
-                return zA - zB;
-            });
-            const displayLayers = sortedLayers; // tiers are already consolidated (typically 3-5)
-            const hiddenLayerCount = 0;
-            const zValues = sortedLayers.map(([n, info]) => info.z_max || info.z_index || 0);
-            const maxZ = Math.max(...zValues, 1);
-            const stackHeight = Math.max(180, Math.min(360, 80 + displayLayers.length * 50));
-            const zTooltipId = 'z-tooltip-' + Math.random().toString(36).slice(2, 8);
+                // Friendly description: what's IN the layer
+                const elSummary = topEls.map(el => {
+                    const label = el.label || el.selector || '';
+                    // Extract just the meaningful part
+                    if (label.length > 28) return label.substring(0, 25) + '…';
+                    return label;
+                });
 
-            const visualStackHTML = `
-                <div style="margin: 1rem 0; padding: 1.5rem; background: rgba(10, 10, 10, 0.4); border-radius: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <div>
-                            <div style="font-size: 2.5rem; font-weight: 700; color: #0a84ff; line-height: 1;">${layerCount}</div>
-                            <div style="font-size: 0.82rem; color: #888; margin-top: 0.2rem;">Stacking Tier${layerCount !== 1 ? 's' : ''}</div>
-                            ${layerCount > 4 ? '<div style="font-size: 0.72rem; color: #ff9f0a; margin-top: 0.4rem;">Complex layering (typical: 2-4 tiers)</div>' : ''}
-                            ${layerCount <= 3 && layerCount > 0 ? '<div style="font-size: 0.72rem; color: #34c759; margin-top: 0.4rem;">Clean architecture</div>' : ''}
+                // Position badges
+                const badges = [];
+                if (info.elements?.some(el => el.position === 'fixed'))  badges.push('Fixed');
+                if (info.elements?.some(el => el.position === 'sticky')) badges.push('Sticky');
+                if (interCount > 0) badges.push('Interactive');
+
+                return `
+                <div style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                    <div onclick="var d=document.getElementById('${detailId}');var o=d.style.maxHeight!=='0px'&&d.style.maxHeight;d.style.maxHeight=o?'0px':'400px';d.style.opacity=o?'0':'1';this.querySelector('.lp-arrow').style.transform=o?'rotate(-90deg)':'rotate(0deg)';"
+                         style="display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.75rem; cursor: pointer; transition: background 0.15s;"
+                         onmouseenter="this.style.background='rgba(255,255,255,0.03)'" onmouseleave="this.style.background='none'">
+                        <!-- Layer visibility dot -->
+                        <div style="width: 10px; height: 10px; border-radius: 50%; background: ${lc.border}; flex-shrink: 0; box-shadow: 0 0 6px ${lc.border}40;"></div>
+                        <!-- Purpose icon -->
+                        <span style="font-size: 1rem; flex-shrink: 0;">${purposeIcon(purpose || tierName)}</span>
+                        <!-- Layer name -->
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-size: 0.82rem; color: rgba(255,255,255,0.9); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${purpose || tierName}
+                            </div>
+                            <div style="font-size: 0.65rem; color: #555; margin-top: 1px;">
+                                ${count} element${count !== 1 ? 's' : ''}${badges.length ? ' · ' + badges.join(', ') : ''}
+                            </div>
                         </div>
-                        <div style="font-size: 0.68rem; color: #555; text-align: right;">
-                            <div>highest: z-index ${Math.max(...zValues)}</div>
-                            <div>lowest: z-index ${Math.min(...zValues)}</div>
+                        <!-- Tier pill -->
+                        <span style="font-size: 0.6rem; padding: 0.15rem 0.45rem; background: ${lc.bg}; color: ${lc.text}; border-radius: 3px; font-weight: 600; flex-shrink: 0; letter-spacing: 0.03em;">${tierName}</span>
+                        <!-- Expand arrow -->
+                        <span class="lp-arrow" style="font-size: 0.6rem; color: #555; transition: transform 0.2s; transform: rotate(-90deg); flex-shrink: 0;">▼</span>
+                    </div>
+                    <!-- Expanded detail -->
+                    <div id="${detailId}" style="max-height: 0px; opacity: 0; overflow: hidden; transition: max-height 0.25s ease, opacity 0.2s ease; padding: 0 0.75rem;">
+                        <div style="padding: 0.4rem 0 0.7rem 1.8rem; border-left: 2px solid ${lc.border}30; margin-left: 4px;">
+                            ${topEls.map(el => {
+                                const label = el.label || el.selector || 'Unknown';
+                                const shortLabel = label.length > 35 ? label.substring(0, 32) + '…' : label;
+                                const preview = el.textPreview ? `"${el.textPreview.length > 22 ? el.textPreview.substring(0, 19) + '…' : el.textPreview}"` : '';
+                                return `
+                                <div style="padding: 0.3rem 0; display: flex; align-items: center; gap: 0.4rem;">
+                                    <span style="font-size: 0.75rem; color: #aaa;">${shortLabel}</span>
+                                    ${el.isInteractive ? '<span style="font-size:0.55rem; padding:0.1rem 0.3rem; background:rgba(105,240,174,0.15); color:#69f0ae; border-radius:3px;">clickable</span>' : ''}
+                                    ${el.position === 'fixed' ? '<span style="font-size:0.55rem; padding:0.1rem 0.3rem; background:rgba(255,171,64,0.15); color:#ffab40; border-radius:3px;">fixed</span>' : ''}
+                                    ${el.position === 'sticky' ? '<span style="font-size:0.55rem; padding:0.1rem 0.3rem; background:rgba(255,171,64,0.12); color:#ffab40; border-radius:3px;">sticky</span>' : ''}
+                                    ${preview ? `<span style="font-size:0.65rem; color:#555; font-style:italic;">${preview}</span>` : ''}
+                                </div>`;
+                            }).join('')}
+                            ${elements.length > 4 ? `<div style="font-size: 0.68rem; color: #444; padding: 0.3rem 0;">+${elements.length - 4} more</div>` : ''}
+                            <div style="font-size: 0.62rem; color: #444; padding-top: 0.3rem; font-family: 'SF Mono', 'Fira Code', monospace;">
+                                z-index: ${info.z_index || 0}${info.z_max && info.z_max !== info.z_index ? '–' + info.z_max : ''}
+                            </div>
                         </div>
                     </div>
-                    <!-- Vertical layer stack -->
-                    <div style="position: relative; height: ${stackHeight}px; margin: 0.5rem 0;">
-                        <!-- Ground plane -->
-                        <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.1);"></div>
-                        <div style="position: absolute; bottom: -16px; left: 0; font-size: 0.6rem; color: #555;">z: auto</div>
-                        <!-- Tooltip -->
-                        <div id="${zTooltipId}" style="display: none; position: absolute; right: 0; background: rgba(10,10,10,0.95); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 0.5rem 0.7rem; font-size: 0.68rem; color: #ccc; z-index: 100; max-width: 260px; pointer-events: none;"></div>
-                        ${hiddenLayerCount > 0 ? `
-                            <div style="position:absolute; bottom:0; left:48px; font-size:0.65rem; color:var(--text-disabled); font-style:italic;">+${hiddenLayerCount} more layer${hiddenLayerCount !== 1 ? 's' : ''} below</div>
-                        ` : ''}
-                        ${displayLayers.map(([name, info], i) => {
-                            const z = info.z_index || 0;
-                            const zMax = info.z_max || z;
-                            const zRange = z === zMax ? `z: ${z}` : `z: ${z}–${zMax}`;
-                            const zValuesArr = info.z_values || [z];
-                            const c = getLayerColor(name);
+                </div>`;
+            }).join('');
+
+            // Visual stack diagram — simplified side view
+            const stackHTML = sortedLayers.length > 1 ? `
+                <div style="margin: 1rem 0; padding: 1rem; background: rgba(10,10,10,0.3); border-radius: 10px;">
+                    <div style="font-size: 0.68rem; color: #555; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em;">Front → Back</div>
+                    <div style="display: flex; gap: 3px; align-items: flex-end; height: 36px;">
+                        ${sortedLayers.map(([name, info], i) => {
+                            const lc = layerColor(name);
                             const count = info.visible_count || info.count || 0;
-                            const interCount = info.interactive_count || 0;
                             const tierName = name.includes(': ') ? name.split(': ')[0] : name;
-                            const purpose = name.includes(': ') ? name.split(': ').slice(1).join(': ') : '';
-                            const tierDesc = info.tier_desc || '';
-                            // Even spacing for tiers (no log scale needed — already consolidated)
-                            const pos = displayLayers.length <= 1 ? 0.5 : i / (displayLayers.length - 1);
-                            const bottomPx = Math.round(pos * (stackHeight - 40)) + 8;
-                            // Build tooltip content
-                            const els = (info.elements || []).filter(el => el.isVisible !== false).slice(0, 3);
-                            const elStr = els.map(el => (el.label || '?').replace(/"/g, '&quot;').replace(/'/g, '&#39;')).join('<br>');
-                            const valuesStr = zValuesArr.length > 1 ? `Values: ${zValuesArr.join(', ')}` : '';
-                            return `
-                            <div style="position: absolute; bottom: ${bottomPx}px; left: 0; right: 0; min-height: 36px; display: flex; align-items: center; cursor: pointer; transition: background 0.15s;"
-                                 onmouseenter="this.style.background='rgba(${c.r},${c.g},${c.b},0.08)';var t=document.getElementById('${zTooltipId}');t.innerHTML='<strong>${tierName}</strong>: ${purpose.replace(/'/g, '&#39;')}<br>${zRange} (${zValuesArr.length} value${zValuesArr.length!==1?'s':''})<br>${count} elements${interCount ? ', '+interCount+' interactive' : ''}<br>${tierDesc ? '<span style=\\'color:#888\\'>'+tierDesc+'</span><br>' : ''}<span style=\\'color:#666\\'>${elStr || ''}</span>${valuesStr ? '<br><span style=\\'color:#555; font-family:monospace\\'>'+valuesStr+'</span>' : ''}';t.style.display='block';t.style.bottom='${bottomPx}px';"
-                                 onmouseleave="this.style.background='none';document.getElementById('${zTooltipId}').style.display='none';">
-                                <!-- z-range -->
-                                <div style="width: 64px; font-size: 0.65rem; color: #888; font-family: 'SF Mono', monospace; text-align: right; padding-right: 8px; line-height: 1.2;">${zRange}</div>
-                                <!-- tier bar -->
-                                <div style="flex: 1; min-height: 32px; background: linear-gradient(90deg, rgba(${c.r},${c.g},${c.b},0.30), rgba(${c.r},${c.g},${c.b},0.08)); border-left: 3px solid rgb(${c.r},${c.g},${c.b}); border-radius: 0 6px 6px 0; display: flex; align-items: center; justify-content: space-between; padding: 4px 10px;">
-                                    <div style="min-width: 0; overflow: hidden;">
-                                        <div style="font-size: 0.72rem; color: rgba(255,255,255,0.9); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${tierName}</div>
-                                        ${purpose ? `<div style="font-size: 0.62rem; color: rgba(255,255,255,0.5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${purpose}</div>` : ''}
-                                    </div>
-                                    <span style="font-size: 0.62rem; color: rgba(255,255,255,0.4); white-space: nowrap; margin-left: 8px;">${count} el${count !== 1 ? 's' : ''}${interCount ? ' · '+interCount+' ⚡' : ''}</span>
-                                </div>
-                            </div>`;
+                            const purpose = name.includes(': ') ? name.split(': ').slice(1).join(': ') : tierName;
+                            const barH = Math.max(12, Math.round(36 * (count / Math.max(...sortedLayers.map(([_,inf]) => inf.visible_count || inf.count || 1)))));
+                            return `<div title="${purpose}: ${count} elements" style="flex:1; height:${barH}px; background:${lc.border}40; border-top:2px solid ${lc.border}; border-radius:2px 2px 0 0; cursor:default;"></div>`;
+                        }).join('')}
+                    </div>
+                    <div style="display: flex; gap: 3px; margin-top: 2px;">
+                        ${sortedLayers.map(([name]) => {
+                            const tierName = name.includes(': ') ? name.split(': ')[0] : name;
+                            return `<div style="flex:1; font-size:0.55rem; color:#555; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tierName}</div>`;
                         }).join('')}
                     </div>
                 </div>
-            `;
+            ` : '';
 
-            // Create expandable layer list with enriched element data
-            const layersHTML = visibleLayers.map(([name, info], index) => {
-                const elements = info.elements || [];
-                const visCount = info.visible_count || info.count || 0;
-                const interCount = info.interactive_count || 0;
+            // Conflict advisories
+            const conflictsHTML = conflicts.length > 0 ? `
+                <div style="padding: 0.6rem 0.75rem; background: rgba(255,171,64,0.06); border-radius: 8px; margin: 0.5rem 0;">
+                    <div style="font-size: 0.68rem; color: #555; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.05em;">Advisories</div>
+                    ${conflicts.map(c => {
+                        const isClean = c.includes('✅');
+                        const color = isClean ? '#69f0ae' : '#ffab40';
+                        return `<div style="font-size: 0.75rem; color: ${color}; padding: 0.25rem 0; line-height: 1.4;">${c}</div>`;
+                    }).join('')}
+                </div>
+            ` : '';
 
-                // Build enriched element rows
-                const elementsHTML = elements.filter(el => el.isVisible !== false).slice(0, 6).map(el => {
-                    const label = el.label || el.selector || 'Unknown';
-                    const b = el.bounds || {};
-                    const hasBounds = b.width > 0 || b.height > 0;
-                    const boundsStr = hasBounds ? `${b.width}×${b.height} @ (${b.x}, ${b.y})` : '';
-                    const parentStr = el.stackingParent ? `↑ ${el.stackingParent}` : '';
-
-                    return `
-                        <div style="display: flex; align-items: start; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.04);">
-                            <div style="flex: 1; min-width: 0;">
-                                <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
-                                    <span style="font-size: 0.8rem; color: #ddd; font-weight: 500;">${label.length > 35 ? label.substring(0, 32) + '...' : label}</span>
-                                    ${el.isInteractive ? `<span style="font-size: 0.6rem; padding: 0.1rem 0.35rem; background: rgba(52,199,89,0.2); color: #34c759; border-radius: 3px; font-weight: 600;">INTERACTIVE</span>` : ''}
-                                    ${el.position === 'fixed' ? `<span style="font-size: 0.6rem; padding: 0.1rem 0.35rem; background: rgba(255,159,10,0.2); color: #ff9f0a; border-radius: 3px; font-weight: 600;">FIXED</span>` : ''}
-                                    ${el.position === 'sticky' ? `<span style="font-size: 0.6rem; padding: 0.1rem 0.35rem; background: rgba(255,159,10,0.15); color: #ff9f0a; border-radius: 3px; font-weight: 600;">STICKY</span>` : ''}
-                                </div>
-                                <div style="display: flex; gap: 0.75rem; margin-top: 0.15rem; flex-wrap: wrap;">
-                                    ${boundsStr ? `<span style="font-size: 0.7rem; color: #666;">📐 ${boundsStr}</span>` : ''}
-                                    ${parentStr ? `<span style="font-size: 0.7rem; color: #555;">${parentStr}</span>` : ''}
-                                    ${el.textPreview ? `<span style="font-size: 0.7rem; color: #555; font-style: italic;">"${el.textPreview.length > 20 ? el.textPreview.substring(0, 17) + '...' : el.textPreview}"</span>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                const moreCount = visCount > 6 ? `<div style="font-size: 0.72rem; color: #555; padding: 0.3rem 0; text-align: center;">+${visCount - 6} more elements</div>` : '';
-
-                // Layer header badges
-                const badges = [];
-                if (interCount > 0) badges.push(`<span style="font-size: 0.65rem; padding: 0.1rem 0.3rem; background: rgba(52,199,89,0.15); color: #34c759; border-radius: 3px;">🖱 ${interCount}</span>`);
-
-                return `
-                    <div class="z-index-layer" onclick="toggleZLayer(this)">
-                        <div class="layer-header" style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span class="layer-name" style="flex: 1;">${name}</span>
-                            ${badges.join('')}
-                            <span class="layer-count">${visCount} el.</span>
-                            <span class="expand-icon">▼</span>
-                        </div>
-                        <div class="layer-details" style="display: none;">
-                            <div class="layer-elements" style="padding: 0.5rem 0.75rem;">
-                                ${elementsHTML}
-                                ${moreCount}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            // Ghost layers section (collapsed by default, separate from main list)
-            const ghostLayersHTML = ghostLayers.length > 0 ? ghostLayers.map(([name, info]) => {
-                const elements = info.elements || [];
-                return `
-                    <div style="padding: 0.4rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04);">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span style="font-size: 0.78rem; color: #555;">${name}</span>
-                            <span style="font-size: 0.65rem; color: #444;">${info.count} el.</span>
-                        </div>
-                        <div style="font-size: 0.7rem; color: #444; margin-top: 0.15rem;">
-                            ${elements.slice(0, 2).map(el => el.label || el.selector || 'Unknown').join(', ')}
-                        </div>
-                    </div>
-                `;
-            }).join('') : '';
-
-            // Conflict/advisory section
-            const conflictsHTML = conflicts
-                .map(c => {
-                    // Color-code by type
-                    const isGhost = c.includes('👻');
-                    const isClean = c.includes('✅');
-                    const color = isGhost ? '#666' : isClean ? '#34c759' : '#ff9f0a';
-                    return `<div style="font-size: 0.78rem; color: ${color}; padding: 0.3rem 0; line-height: 1.4;">${c}</div>`;
-                })
-                .join('');
-
-            // Generate toggle IDs
-            const zToggleId = 'zlayers-' + Math.random().toString(36).slice(2, 8);
+            // Ghost elements (collapsed)
             const ghostToggleId = 'zghosts-' + Math.random().toString(36).slice(2, 8);
-
-            const layersToggleHTML = layersHTML ? `
-                <div style="margin-top:0.75rem;">
-                    <button onclick="var el=document.getElementById('${zToggleId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';this.querySelector('.sa').style.transform=open?'rotate(0deg)':'rotate(180deg)';" style="width:100%; background:rgba(10,10,10,0.4); border:none; border-radius:8px; padding:0.7rem 1rem; cursor:pointer; display:flex; align-items:center; justify-content:space-between; color:#fff; font-size:0.82rem; font-weight:600;">
-                        <span>Layer details <span style="color:#666; font-weight:400;">(click each layer to inspect elements)</span></span>
-                        <span class="sa" style="display:inline-block; transform:rotate(0deg); transition:transform 0.2s; color:#666;">▼</span>
+            const ghostToggleHTML = ghostElements > 0 ? `
+                <div style="margin-top: 0.5rem;">
+                    <button onclick="var el=document.getElementById('${ghostToggleId}');var o=el.style.display!=='none';el.style.display=o?'none':'block';this.querySelector('.sa').style.transform=o?'rotate(0deg)':'rotate(180deg)';"
+                            style="width:100%; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.06); border-radius:8px; padding:0.45rem 0.75rem; cursor:pointer; display:flex; align-items:center; justify-content:space-between; color:#444; font-size:0.72rem;">
+                        <span>👻 ${ghostElements} hidden element${ghostElements !== 1 ? 's' : ''} (tracking pixels, zero-size iframes)</span>
+                        <span class="sa" style="display:inline-block; transform:rotate(0deg); transition:transform 0.2s; color:#333;">▼</span>
                     </button>
-                    <div id="${zToggleId}" style="display:none; border-radius:0 0 8px 8px; overflow:hidden;">
-                        <div class="z-index-layers-list">${layersHTML}</div>
+                    <div id="${ghostToggleId}" style="display:none; padding: 0.4rem 0.75rem; background:rgba(10,10,10,0.2); border-radius:0 0 8px 8px;">
+                        ${ghostLayers.map(([name, info]) => {
+                            const elements = info.elements || [];
+                            return `<div style="padding:0.3rem 0; font-size:0.7rem; color:#444;">${elements.slice(0,2).map(el => el.label || el.selector || '?').join(', ')}${elements.length > 2 ? ` +${elements.length-2}` : ''}</div>`;
+                        }).join('')}
                     </div>
                 </div>
             ` : '';
 
-            const ghostToggleHTML = ghostLayersHTML ? `
-                <div style="margin-top:0.5rem;">
-                    <button onclick="var el=document.getElementById('${ghostToggleId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';this.querySelector('.sa').style.transform=open?'rotate(0deg)':'rotate(180deg)';" style="width:100%; background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.08); border-radius:8px; padding:0.5rem 1rem; cursor:pointer; display:flex; align-items:center; justify-content:space-between; color:#555; font-size: 0.78rem;">
-                        <span>👻 Ghost elements (${ghostElements} tracking pixels / zero-size iframes)</span>
-                        <span class="sa" style="display:inline-block; transform:rotate(0deg); transition:transform 0.2s; color:#444;">▼</span>
-                    </button>
-                    <div id="${ghostToggleId}" style="display:none; border-radius:0 0 8px 8px; overflow:hidden; background: rgba(10,10,10,0.2);">
-                        ${ghostLayersHTML}
-                    </div>
-                </div>
-            ` : '';
-
-            // Health badge
-            const health = data.health || {};
-            const healthLevel = health.level || 'Unknown';
-            const healthColors = { 'Clean': 'var(--success)', 'Complex': 'var(--warning)', 'Chaotic': 'var(--danger)', 'Unknown': 'var(--text-disabled)' };
-            const healthBgs = { 'Clean': 'var(--success-muted)', 'Complex': 'var(--warning-muted)', 'Chaotic': 'var(--danger-muted)', 'Unknown': 'var(--surface-3)' };
-            const healthBadgeHTML = `
-                <div style="display:inline-flex; align-items:center; gap:var(--space-2); padding:var(--space-1) var(--space-3); background:${healthBgs[healthLevel] || healthBgs['Unknown']}; color:${healthColors[healthLevel] || healthColors['Unknown']}; border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:600; margin-bottom:var(--space-3);">
-                    ${healthLevel === 'Clean' ? '&#10003;' : healthLevel === 'Complex' ? '&#9888;' : healthLevel === 'Chaotic' ? '&#10007;' : '?'} ${healthLevel}
-                    ${health.detail ? `<span style="color:var(--text-tertiary); font-weight:400;"> &mdash; ${health.detail}</span>` : ''}
+            // Stats pills
+            const statsHTML = `
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.5rem 0 1rem;">
+                    <span style="display:inline-flex; align-items:center; gap:0.25rem; padding:0.2rem 0.5rem; background:rgba(255,255,255,0.04); border-radius:20px; font-size:0.7rem; color:#777;">
+                        ${visibleElements} visible
+                    </span>
+                    ${totalInteractive > 0 ? `<span style="display:inline-flex; align-items:center; gap:0.25rem; padding:0.2rem 0.5rem; background:rgba(105,240,174,0.08); border-radius:20px; font-size:0.7rem; color:#69f0ae;">
+                        ${totalInteractive} interactive
+                    </span>` : ''}
                 </div>
             `;
 
@@ -6553,27 +6445,23 @@
                     </div>
                     <div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>
                 </div>
-                ${healthBadgeHTML}
+                ${headerHTML}
                 ${statsHTML}
-                ${visualStackHTML}
-                ${conflictsHTML ? `<div style="padding: 0.5rem 0.75rem; background: var(--surface-0); border-radius: var(--radius-md); margin: 0.5rem 0;">${conflictsHTML}</div>` : ''}
-                ${layersToggleHTML}
+                <!-- Layer panel -->
+                <div style="background: rgba(10,10,10,0.35); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); overflow: hidden;">
+                    <div style="padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 0.72rem; color: #666; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;">Layers</span>
+                        <span style="font-size: 0.65rem; color: #444;">front → back</span>
+                    </div>
+                    ${layerPanelHTML}
+                </div>
+                ${stackHTML}
+                ${conflictsHTML}
                 ${ghostToggleHTML}
             `;
         }
 
-        function toggleZLayer(element) {
-            const details = element.querySelector('.layer-details');
-            const icon = element.querySelector('.expand-icon');
-
-            if (details.style.display === 'none') {
-                details.style.display = 'block';
-                icon.textContent = '▲';
-            } else {
-                details.style.display = 'none';
-                icon.textContent = '▼';
-            }
-        }
+        // toggleZLayer removed — new Page Layers card uses inline expand/collapse
 
         function createBorderRadiusCard(icon, title, data, confidenceClass) {
             const levels = data.levels || [];
