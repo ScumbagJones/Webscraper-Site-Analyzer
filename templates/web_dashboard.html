@@ -9289,6 +9289,8 @@
                     el.text && hierarchy.primary_cta.text &&
                     el.text.includes(hierarchy.primary_cta.text.substring(0, 15)));
 
+                const isNav = el.isNavReserved || el.isNavStructural;
+
                 let color, label;
                 if (isHero) {
                     color = '#ff453a';
@@ -9296,6 +9298,9 @@
                 } else if (isCTA) {
                     color = '#34c759';
                     label = '🎯 CTA';
+                } else if (isNav) {
+                    color = '#7ec8e3';
+                    label = '🧭 Navigation';
                 } else {
                     color = rankColor(rank - 1, weightMap.length);
                     label = deriveSemanticLabel(el, i);
@@ -9320,7 +9325,7 @@
                         weight: el.weight ? el.weight.toFixed(1) : '—',
                         weightPct: weightPct,
                         size: `${Math.round(el.rect.width)}×${Math.round(el.rect.height)}`,
-                        fontSize: el.fontSize ? Math.round(el.fontSize) + 'px' : null,
+                        fontSize: (el.styles && el.styles.fontSize) ? Math.round(el.styles.fontSize) + 'px' : (el.fontSize ? Math.round(el.fontSize) + 'px' : null),
                         aboveFold: el.rect.top < vpH,
                         state: stateEntry
                     }

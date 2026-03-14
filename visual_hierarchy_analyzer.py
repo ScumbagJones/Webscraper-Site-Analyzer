@@ -204,7 +204,10 @@ class VisualHierarchyAnalyzer:
                 return smallerArea > 0 ? intersection / smallerArea : 0;
             }
 
-            // Sort by weight descending, filter nav structural
+            // Sort by weight descending, separate nav structural from content
+            const navStructural = weightedElements
+                .filter(el => el.isNavStructural)
+                .sort((a, b) => b.weight - a.weight);
             const candidates = weightedElements
                 .filter(el => !el.isNavStructural)
                 .sort((a, b) => b.weight - a.weight);
@@ -230,6 +233,21 @@ class VisualHierarchyAnalyzer:
                 if (tc >= 3) continue;
                 tagCounts[el.tag] = tc + 1;
                 sorted.push(el);
+            }
+
+            // Inject top nav/header as reserved region (guaranteed visibility)
+            // Nav is important for IA understanding but shouldn't compete with content
+            if (navStructural.length > 0) {
+                const topNav = navStructural[0];
+                // Only inject if it has a meaningful rect and isn't a viewport-spanning wrapper
+                if (topNav.rect.width > 100 && topNav.rect.height > 20
+                    && topNav.rect.height < topNav.rect.width * 0.5) {
+                    // Mark it so dashboard can style it differently
+                    topNav.isNavReserved = true;
+                    // Insert after rank 1 (hero) but before other content
+                    const insertPos = Math.min(1, sorted.length);
+                    sorted.splice(insertPos, 0, topNav);
+                }
             }
 
             // Detect hero section (largest heading + nearby image)
