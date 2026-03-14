@@ -4104,8 +4104,7 @@
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
                         { key: 'z_index_stack', icon: '📚', title: 'Page Layers' },
                         { key: 'dom_depth', icon: '🌳', title: 'DOM Depth' },
-                        { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' },
-                        { key: 'site_topology', icon: '🗺️', title: 'Site Topology' }
+                        { key: 'site_topology', icon: '🏛', title: 'Information Architecture' }
                     ]
                 },
                 {
@@ -4835,8 +4834,7 @@
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
                         { key: 'z_index_stack', icon: '📚', title: 'Page Layers' },
                         { key: 'dom_depth', icon: '🌳', title: 'DOM Depth' },
-                        { key: 'site_architecture', icon: '🏗', title: 'Site Architecture' },
-                        { key: 'site_topology', icon: '🗺️', title: 'Site Topology' }
+                        { key: 'site_topology', icon: '🏛', title: 'Information Architecture' }
                     ]
                 },
                 {
@@ -5274,8 +5272,8 @@
                 bodyHTML = createThirdPartyCard(icon, title, data, confidenceClass);
             } else if (title === 'Accessibility') {
                 bodyHTML = createAccessibilityCard(icon, title, data, confidenceClass);
-            } else if (title === 'Site Architecture') {
-                bodyHTML = createSiteArchitectureCard(icon, title, data, confidenceClass);
+            } else if (title === 'Site Architecture' || title === 'Information Architecture') {
+                bodyHTML = createInformationArchitectureCard(icon, title, data, confidenceClass);
             } else if (title === 'Token Taxonomy') {
                 bodyHTML = createTokenTaxonomyCard(icon, title, data, confidenceClass);
             } else if (title === 'Interaction States') {
@@ -5299,7 +5297,7 @@
             } else if (title === 'CSS Specificity') {
                 bodyHTML = createCSSSpecificityCard(icon, title, data, confidenceClass);
             } else if (title === 'Site Topology') {
-                bodyHTML = createSiteTopologyCard(icon, title, data, confidenceClass);
+                bodyHTML = createInformationArchitectureCard(icon, title, data, confidenceClass);
             } else {
                 bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
             }
@@ -5489,6 +5487,8 @@
                 case 'Token Taxonomy':
                     return safeDisplayValue(data.pattern);
                 case 'Site Topology':
+                case 'Information Architecture':
+                    if (data.total_pages) return `${data.total_pages} pages, ${(data.sections||[]).length} sections`;
                     return safeDisplayValue(data.pattern);
                 default:
                     return safeDisplayValue(data.pattern);
@@ -7991,6 +7991,176 @@
             `;
         }
 
+        // ── Information Architecture Card (unified topology + tech stack) ──
+        function createInformationArchitectureCard(icon, title, data, confidenceClass) {
+            // Pull topology data (primary — content organization)
+            const sections = data.sections || [];
+            const hierarchy = data.hierarchy || {};
+            const urlPatterns = data.url_patterns || [];
+            const contentDist = data.content_distribution || {};
+            const totalPages = data.total_pages || 0;
+            const urlSource = data.url_source || 'unknown';
+
+            // Pull architecture data (secondary — tech stack)
+            const _ev = (typeof currentEvidence !== 'undefined' && currentEvidence) ? currentEvidence : {};
+            const arch = _ev.site_architecture || {};
+            const archD = arch.details || {};
+            const caps = archD.capabilities || {};
+
+            // Content type colors
+            const typeColors = {
+                documentation: '#7ec8e3', blog: '#c9b8ff', product: '#68d68d',
+                developer: '#6c9eff', corporate: '#ff9f0a', community: '#f09dff',
+                media: '#ff8fa3', other: '#666'
+            };
+            const typeIcons = {
+                documentation: '📖', blog: '✏️', product: '🛍', developer: '⚙️',
+                corporate: '🏢', community: '💬', media: '🎬', other: '📄'
+            };
+
+            // Shape info
+            const shape = hierarchy.shape || 'balanced';
+            const maxDepth = hierarchy.max_depth || 0;
+            const nSections = sections.length;
+
+            // ── Hero stats ──
+            const heroHTML = totalPages > 0 ? `
+                <div style="display:flex; align-items:baseline; gap:0.6rem; margin-bottom:0.75rem;">
+                    <span style="font-size:2rem; font-weight:800; color:#7ec8e3; line-height:1;">${totalPages}</span>
+                    <span style="font-size:0.78rem; color:#888;">pages</span>
+                    <span style="font-size:0.78rem; color:#555;">·</span>
+                    <span style="font-size:1.4rem; font-weight:700; color:#c9b8ff;">${nSections}</span>
+                    <span style="font-size:0.78rem; color:#888;">sections</span>
+                    <span style="font-size:0.78rem; color:#555;">·</span>
+                    <span style="font-size:1.4rem; font-weight:700; color:#ff9f0a;">${maxDepth}</span>
+                    <span style="font-size:0.78rem; color:#888;">levels deep</span>
+                </div>
+            ` : '';
+
+            // ── Content Distribution — stacked bar + legend ──
+            const distEntries = Object.entries(contentDist).filter(([_, v]) => (v.count || 0) > 0);
+            const totalDistPages = distEntries.reduce((sum, [, v]) => sum + (v.count || 0), 0) || 1;
+            const distHTML = distEntries.length > 0 ? `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">What this site publishes</div>
+                    <div style="height:10px; border-radius:5px; overflow:hidden; display:flex; background:rgba(255,255,255,0.05); margin-bottom:6px;">
+                        ${distEntries.map(([type, info]) => {
+                            const w = ((info.count || 0) / totalDistPages) * 100;
+                            const c = typeColors[type] || '#666';
+                            return '<div style="height:100%; width:' + w + '%; background:' + c + ';" title="' + type + ': ' + (info.count||0) + ' pages (' + (info.pct||0) + '%)"></div>';
+                        }).join('')}
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                        ${distEntries.map(([type, info]) => {
+                            const c = typeColors[type] || '#666';
+                            const ic = typeIcons[type] || '📄';
+                            return '<span style="display:inline-flex; align-items:center; gap:3px; font-size:0.68rem; color:' + c + ';">' + ic + ' ' + type + ' <span style="color:#888;">' + (info.pct||0) + '%</span></span>';
+                        }).join('')}
+                    </div>
+                </div>` : '';
+
+            // ── Sections — visual tree ──
+            const maxPages = sections.length ? Math.max(...sections.map(s => s.page_count)) : 1;
+            const sectionsHTML = sections.length > 0 ? `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Site sections</div>
+                    ${sections.slice(0, 10).map(function(s) {
+                        const pct = Math.min(100, (s.page_count / maxPages) * 100);
+                        const color = typeColors[s.type] || '#666';
+                        const ic = typeIcons[s.type] || '📄';
+                        const depthDots = '·'.repeat(Math.min(s.depth || 1, 4));
+                        return '<div style="display:flex; align-items:center; gap:6px; padding:3px 0;">' +
+                            '<span style="width:14px; text-align:center; font-size:0.7rem;">' + ic + '</span>' +
+                            '<span style="width:72px; flex-shrink:0; font-size:0.72rem; color:#ccc; font-family:\'SF Mono\',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">/' + s.path + '</span>' +
+                            '<div style="flex:1; height:5px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden;">' +
+                                '<div style="height:100%; width:' + pct + '%; background:' + color + '; border-radius:3px;"></div>' +
+                            '</div>' +
+                            '<span style="width:24px; text-align:right; font-size:0.62rem; color:#aaa; font-family:\'SF Mono\',monospace;">' + s.page_count + '</span>' +
+                            (s.depth > 1 ? '<span style="font-size:0.5rem; color:#444; width:20px;" title="' + s.depth + ' levels deep">' + depthDots + '</span>' : '<span style="width:20px;"></span>') +
+                        '</div>';
+                    }).join('')}
+                    ${sections.length > 10 ? '<div style="font-size:0.62rem; color:#444; padding-top:2px;">+' + (sections.length - 10) + ' more sections</div>' : ''}
+                </div>` : '';
+
+            // ── URL Templates ──
+            const patternsHTML = urlPatterns.length > 0 ? `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">URL patterns</div>
+                    ${urlPatterns.slice(0, 5).map(function(p) {
+                        return '<div style="display:flex; align-items:center; gap:6px; padding:2px 0;">' +
+                            '<span style="flex:1; font-size:0.66rem; color:#c9b8ff; font-family:\'SF Mono\',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (p.template || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>' +
+                            '<span style="font-size:0.6rem; color:#888; flex-shrink:0;">' + p.count + ' pg</span>' +
+                        '</div>';
+                    }).join('')}
+                </div>` : '';
+
+            // ── Tech Stack (from site_architecture) — compact inline ──
+            const techParts = [];
+            if (archD.framework && archD.framework !== 'vanilla/unknown') techParts.push({label: archD.framework, color: '#6c9eff'});
+            if (archD.css_framework) techParts.push({label: archD.css_framework, color: '#68d68d'});
+            if (archD.cms) techParts.push({label: archD.cms, color: '#ff6bcb'});
+            if (archD.bundler) techParts.push({label: archD.bundler, color: '#ff8fa3'});
+            if (archD.router_type && archD.router_type !== 'traditionally') techParts.push({label: archD.router_type + ' routing', color: '#a78bfa'});
+
+            // Capability pills
+            const capPills = [];
+            if (caps.service_worker) capPills.push('Works offline');
+            if (caps.prefetching) capPills.push('Prefetches');
+            if (caps.i18n) capPills.push('Multi-language');
+            if (caps.websockets || caps.graphql) capPills.push('Real-time');
+            if (caps.feature_flags) capPills.push('A/B testing');
+            if (archD.auth_detected) capPills.push('Auth');
+
+            const techToggleId = 'tech-' + Math.random().toString(36).slice(2, 8);
+            const techHTML = techParts.length > 0 ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:0.5rem;">
+                    <button onclick="var el=document.getElementById('${techToggleId}');var o=el.style.display!=='none';el.style.display=o?'none':'block';this.querySelector('.sa').style.transform=o?'rotate(0deg)':'rotate(180deg)';"
+                            style="width:100%; background:rgba(255,255,255,0.03); border:none; border-radius:6px; padding:0.4rem 0.6rem; cursor:pointer; display:flex; align-items:center; justify-content:space-between; color:#888; font-size:0.72rem;">
+                        <span>🔧 Built with: <span style="color:#ccc;">${techParts.map(t => t.label).join(' + ')}</span></span>
+                        <span class="sa" style="display:inline-block; transform:rotate(0deg); transition:transform 0.2s; color:#555;">▼</span>
+                    </button>
+                    <div id="${techToggleId}" style="display:none; padding:0.5rem 0.6rem;">
+                        <div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:0.4rem;">
+                            ${techParts.map(t => '<span style="display:inline-block; background:' + t.color + '15; border:1px solid ' + t.color + '33; color:' + t.color + '; font-size:0.68rem; padding:2px 8px; border-radius:12px;">' + t.label + '</span>').join('')}
+                        </div>
+                        ${capPills.length > 0 ? '<div style="display:flex; flex-wrap:wrap; gap:4px;">' + capPills.map(p => '<span style="display:inline-block; background:rgba(255,255,255,0.05); color:#777; font-size:0.62rem; padding:2px 7px; border-radius:10px;">' + p + '</span>').join('') + '</div>' : ''}
+                    </div>
+                </div>` : '';
+
+            // ── Source badge ──
+            const sourceLabels = { cloudflare: 'Cloudflare Crawl', nav_discovery: 'Nav Discovery', interactive: 'Interactive', multi_page: 'Smart Nav' };
+            const sourceLabel = sourceLabels[urlSource] || urlSource;
+
+            // ── Single-page fallback: show tech stack prominently when no topology ──
+            const isSinglePage = totalPages === 0 && techParts.length > 0;
+            const singlePageFallback = isSinglePage ? `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Technology stack</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:5px;">
+                        ${techParts.map(t => '<span style="display:inline-flex; align-items:center; gap:4px; background:' + t.color + '18; border:1px solid ' + t.color + '44; color:' + t.color + '; font-size:0.75rem; font-weight:500; padding:4px 12px; border-radius:20px;">' + t.label + '</span>').join('')}
+                    </div>
+                    ${capPills.length > 0 ? '<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:0.4rem;">' + capPills.map(p => '<span style="display:inline-block; background:rgba(255,255,255,0.06); color:#888; font-size:0.7rem; padding:3px 10px; border-radius:16px;">' + p + '</span>').join('') + '</div>' : ''}
+                </div>` : '';
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
+                        ${createInfoIcon('site_topology', data.confidence)}
+                    </div>
+                    <div class="confidence-badge confidence-${confidenceClass}">${data.confidence || arch.confidence || 0}%</div>
+                </div>
+                ${heroHTML}
+                ${isSinglePage ? singlePageFallback : ''}
+                ${distHTML}
+                ${sectionsHTML}
+                ${patternsHTML}
+                ${!isSinglePage ? techHTML : ''}
+                ${urlSource !== 'unknown' ? '<div style="text-align:right; margin-top:0.3rem;"><span style="font-size:0.56rem; color:#444; background:rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px;">via ' + sourceLabel + '</span></div>' : ''}
+            `;
+        }
+
         // ── Third-Party Card ──────────────────────────────────────────
         function createThirdPartyCard(icon, title, data, confidenceClass) {
             const details = data.details || {};
@@ -10437,20 +10607,8 @@
                 }
             }
 
-            // --- Site Architecture ---
-            if (e.site_architecture) {
-                md += `## Site Architecture\n\n`;
-                const arch = e.site_architecture.details || {};
-                if (arch.framework) md += `- **Framework:** ${arch.framework}\n`;
-                if (arch.css_framework) md += `- **CSS Framework:** ${arch.css_framework}\n`;
-                if (arch.bundler) md += `- **Bundler:** ${arch.bundler}\n`;
-                if (arch.state_mgmt) md += `- **State Management:** ${arch.state_mgmt}\n`;
-                if (arch.router_type) md += `- **Router:** ${arch.router_type}\n`;
-                const caps = arch.capabilities || {};
-                const active = Object.entries(caps).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' '));
-                if (active.length > 0) md += `- **Capabilities:** ${active.join(', ')}\n`;
-                md += `\n`;
-            }
+            // --- Site Architecture (now part of Information Architecture) ---
+            // Kept for backward compatibility — data still exported
 
             // --- Content Structure ---
             if (e.content_extraction) {
@@ -10530,16 +10688,25 @@
                 md += `- **Extractors Run:** ${e.scan_timing.extractor_count || 0}\n\n`;
             }
 
-            // --- Site Topology ---
+            // --- Information Architecture (unified topology + tech stack) ---
             if (e.site_topology && e.site_topology.sections) {
-                md += `## Site Topology\n\n`;
+                md += `## Information Architecture\n\n`;
                 md += `- **Total Pages:** ${e.site_topology.total_pages || 0}\n`;
                 md += `- **Sections:** ${(e.site_topology.sections || []).length}\n`;
                 const h = e.site_topology.hierarchy || {};
                 md += `- **Max Depth:** ${h.max_depth || 0}\n`;
-                md += `- **Avg Depth:** ${h.avg_depth || 0}\n`;
                 md += `- **Shape:** ${h.label || h.shape || 'unknown'}\n`;
-                md += `- **Source:** ${e.site_topology.url_source || 'unknown'}\n\n`;
+                md += `- **Source:** ${e.site_topology.url_source || 'unknown'}\n`;
+                // Include tech stack inline
+                if (e.site_architecture) {
+                    const arch = e.site_architecture.details || {};
+                    const techParts = [arch.framework, arch.css_framework, arch.bundler].filter(Boolean);
+                    if (techParts.length) md += `- **Built with:** ${techParts.join(' + ')}\n`;
+                    const caps = arch.capabilities || {};
+                    const active = Object.entries(caps).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' '));
+                    if (active.length > 0) md += `- **Capabilities:** ${active.join(', ')}\n`;
+                }
+                md += `\n`;
                 if (e.site_topology.sections.length > 0) {
                     md += `### Sections\n\n`;
                     md += `| Path | Pages | Depth | Type |\n|------|-------|-------|------|\n`;
@@ -10555,6 +10722,18 @@
                     });
                     md += `\n`;
                 }
+            } else if (e.site_architecture) {
+                // Fallback: single-page mode, only tech stack available
+                md += `## Information Architecture\n\n`;
+                const arch = e.site_architecture.details || {};
+                if (arch.framework) md += `- **Framework:** ${arch.framework}\n`;
+                if (arch.css_framework) md += `- **CSS Framework:** ${arch.css_framework}\n`;
+                if (arch.bundler) md += `- **Bundler:** ${arch.bundler}\n`;
+                if (arch.router_type) md += `- **Router:** ${arch.router_type}\n`;
+                const caps = arch.capabilities || {};
+                const active = Object.entries(caps).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' '));
+                if (active.length > 0) md += `- **Capabilities:** ${active.join(', ')}\n`;
+                md += `\n`;
             }
 
             md += `---\n*Generated by Web Intelligence Scraper*\n`;
