@@ -9252,29 +9252,36 @@
             if (!hierarchy) return [];
             const regions = [];
 
-            // 1. Hero
             const hero = hierarchy.hero_section;
-            if (hero && hero.detected) {
-                // hero_section comes from Python formatting — re-parse position/size
-                // But we also have visual_weight_map which has raw rects.
-                // Use heroHeading if present (raw from JS), else skip overlay for hero.
-            }
-
-            // Use visual_weight_map — the ranked top-10 elements with raw rects
             const vpW = (hierarchy.viewport && hierarchy.viewport.width)  || 1920;
             const vpH = (hierarchy.viewport && hierarchy.viewport.height) || 1080;
             const regionStates = hierarchy.region_states || [];
             const weightMap = hierarchy.visual_weight_map || [];
+
+            // Rank-based heat gradient: #1 hottest → #10 coolest
+            // HSL hue: 0 (red) → 30 (orange) → 50 (gold) → 200 (blue) → 260 (purple)
+            function rankColor(rank, total) {
+                const t = total <= 1 ? 0 : rank / (total - 1); // 0=top, 1=bottom
+                const hue = Math.round(0 + t * 260);           // red → purple
+                const sat = Math.round(85 - t * 20);           // 85% → 65%
+                const lit = Math.round(60 - t * 10);           // 60% → 50%
+                return `hsl(${hue}, ${sat}%, ${lit}%)`;
+            }
+
+            // Find max weight for relative percentages
+            const maxWeight = weightMap.length > 0
+                ? Math.max(...weightMap.filter(el => el.weight).map(el => el.weight))
+                : 1;
+
+            let rank = 0;
             weightMap.forEach((el, i) => {
                 if (!el.rect) return;
-                // Skip if off-screen (negative left = carousel slide not active)
                 if (el.rect.left < -100) return;
-                // Skip if too small to be meaningful
                 if (el.rect.width < 40 || el.rect.height < 20) return;
-                // Skip full-page structural containers — same heuristic as Python attention flow.
-                // html/body always, plus anything spanning >80% width AND >200% height.
                 if (['html','body','head'].includes(el.tag)) return;
                 if (el.rect.width > vpW * 0.8 && el.rect.height > vpH * 2) return;
+
+                rank++;
 
                 const isHero = (hero && hero.detected && el.text &&
                     hero.text && el.text.includes(hero.text.substring(0, 20)));
@@ -9290,19 +9297,19 @@
                     color = '#34c759';
                     label = '🎯 CTA';
                 } else {
-                    // Rotate through a palette for ranked elements
-                    const palette = ['#0a84ff','#bf5af2','#ff9f0a','#5ac8fa','#ff6b6b','#34c759','#ffd60a','#30d158'];
-                    color = palette[i % palette.length];
+                    color = rankColor(rank - 1, weightMap.length);
                     label = deriveSemanticLabel(el, i);
                 }
 
                 const sel = el.id ? `#${el.id}` : (el.className ? `.${el.className.split(' ')[0]}` : el.tag);
-
-                // Match region_states entry by index
                 const stateEntry = regionStates.find(s => s.region_index === i) || null;
+
+                // Weight as percentage of max
+                const weightPct = el.weight ? Math.round((el.weight / maxWeight) * 100) : 0;
 
                 regions.push({
                     id: i,
+                    rank: rank,
                     name: label,
                     color: color,
                     origRect: { x: el.rect.left, y: el.rect.top, w: el.rect.width, h: el.rect.height },
@@ -9311,7 +9318,10 @@
                         selector: sel,
                         text: el.text || '',
                         weight: el.weight ? el.weight.toFixed(1) : '—',
+                        weightPct: weightPct,
                         size: `${Math.round(el.rect.width)}×${Math.round(el.rect.height)}`,
+                        fontSize: el.fontSize ? Math.round(el.fontSize) + 'px' : null,
+                        aboveFold: el.rect.top < vpH,
                         state: stateEntry
                     }
                 });
@@ -9320,10 +9330,13 @@
             return regions;
         }
 
-        // ── Draw one SVG rect for a region (scaled) ────────────────────────
+        // ── Draw one SVG rect + rank badge for a region (scaled) ─────────
         function drawRegion(svg, region, index) {
             const s = _vhScale;
             const r = region.origRect;
+            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            g.setAttribute('data-region-id', index);
+            g.style.cursor = 'pointer';
 
             const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
             rect.setAttribute('x',      r.x * s);
@@ -9334,33 +9347,59 @@
             rect.setAttribute('stroke', region.color);
             rect.setAttribute('stroke-width', '2');
             rect.setAttribute('rx', '4');
-            rect.setAttribute('data-region-id', index);
-            rect.style.cursor = 'pointer';
             rect.style.transition = 'fill 0.15s';
+            g.appendChild(rect);
+
+            // Rank badge — small circle with number at top-left of region
+            if (region.rank) {
+                const badgeR = Math.max(8, Math.min(12, 10 * s));
+                const cx = r.x * s + badgeR + 2;
+                const cy = r.y * s + badgeR + 2;
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', cx);
+                circle.setAttribute('cy', cy);
+                circle.setAttribute('r', badgeR);
+                circle.setAttribute('fill', region.color);
+                circle.setAttribute('stroke', '#000');
+                circle.setAttribute('stroke-width', '1');
+                g.appendChild(circle);
+
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', cx);
+                label.setAttribute('y', cy + 1);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('dominant-baseline', 'central');
+                label.setAttribute('fill', '#fff');
+                label.setAttribute('font-size', Math.round(badgeR * 1.1) + 'px');
+                label.setAttribute('font-weight', '700');
+                label.setAttribute('font-family', '-apple-system, sans-serif');
+                label.textContent = region.rank;
+                g.appendChild(label);
+            }
 
             // ── hover: fill tint + show tooltip ─────────────────────────
-            rect.addEventListener('mouseenter', (e) => {
-                rect.setAttribute('fill', region.color + '55');
+            g.addEventListener('mouseenter', (e) => {
+                rect.setAttribute('fill', region.color.replace(')', ',0.25)').replace('hsl(', 'hsla('));
                 highlightFlowItem(index, true);
                 showTooltip(e, region);
             });
-            rect.addEventListener('mousemove', (e) => {
+            g.addEventListener('mousemove', (e) => {
                 moveTooltip(e);
             });
-            rect.addEventListener('mouseleave', () => {
+            g.addEventListener('mouseleave', () => {
                 rect.setAttribute('fill', 'transparent');
                 highlightFlowItem(index, false);
                 hideTooltip();
             });
 
             // ── click: open rip-component modal ───────────────────────
-            rect.addEventListener('click', () => {
+            g.addEventListener('click', () => {
                 if (region.data && region.data.selector) {
                     ripComponent(region.data.selector);
                 }
             });
 
-            svg.appendChild(rect);
+            svg.appendChild(g);
         }
 
         // ── Tooltip show / move / hide ─────────────────────────────────────
@@ -9368,17 +9407,25 @@
             const tip = document.getElementById('hoverTooltip');
             if (!tip) return;
             const d = region.data || {};
-            // Collapse whitespace so textContent like "\n\n\n  Foo\n  Bar" becomes "Foo Bar"
             const cleanText = (d.text || '').replace(/\s+/g, ' ').trim();
+            const rank = region.rank || '?';
+            const pct = d.weightPct || 0;
             tip.innerHTML = `
                 <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
-                    <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${region.color};"></span>
+                    <span style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:${region.color}; color:#fff; font-size:0.72rem; font-weight:700;">${rank}</span>
                     <strong style="color:#fff; font-size:0.88rem;">${region.name}</strong>
                     <span style="color:#666; font-size:0.78rem; margin-left:auto;">${d.size||''}</span>
                 </div>
                 ${d.tag ? `<div style="font-size:0.8rem; color:#aaa;"><code style="color:${region.color};">&lt;${d.tag}&gt;</code> <code style="color:#666;">${d.selector||''}</code></div>` : ''}
                 ${cleanText ? `<div style="font-size:0.8rem; color:#ccc; margin-top:0.3rem; border-top:1px solid rgba(255,255,255,0.08); padding-top:0.3rem;">"${cleanText.substring(0,60)}${cleanText.length>60?'…':''}"</div>` : ''}
-                <div style="font-size:0.75rem; color:#ff9f0a; margin-top:0.3rem;">Weight: ${d.weight}</div>
+                <div style="margin-top:0.35rem; display:flex; align-items:center; gap:0.4rem;">
+                    <span style="font-size:0.75rem; color:#ff9f0a;">Weight: ${d.weight}</span>
+                    <span style="font-size:0.68rem; color:#666;">(${pct}% of max)</span>
+                </div>
+                <div style="display:flex; gap:0.5rem; margin-top:0.2rem; font-size:0.68rem; color:#555;">
+                    ${d.fontSize ? `<span>font: ${d.fontSize}</span>` : ''}
+                    <span>${d.aboveFold ? '▲ above fold' : '▼ below fold'}</span>
+                </div>
                 ${d.state && d.state.has_state_change ? `
                 <div style="font-size:0.78rem; color:#34c759; margin-top:0.4rem; border-top:1px solid rgba(255,255,255,0.08); padding-top:0.35rem;">
                     <span style="margin-right:0.3rem;">&#9889;</span>Interactive States
@@ -9424,14 +9471,19 @@
 
         // ── Highlight a region rect on the screenshot by index ─────────────
         function highlightRegionRect(index, on) {
-            const rect = document.querySelector(`[data-region-id="${index}"]`);
+            const g = document.querySelector(`[data-region-id="${index}"]`);
+            if (!g) return;
+            const rect = g.tagName === 'rect' ? g : g.querySelector('rect');
             if (!rect) return;
             const color = (_vhRegions[index] || {}).color || '#fff';
-            rect.setAttribute('fill', on ? color + '55' : 'transparent');
-            rect.setAttribute('stroke-width', on ? '4' : '2');
-            rect.setAttribute('stroke', on ? color : color);
             if (on) {
-                // Scroll screenshot into view if it's off-screen
+                rect.setAttribute('fill', color.replace(')', ',0.25)').replace('hsl(', 'hsla('));
+                rect.setAttribute('stroke-width', '4');
+            } else {
+                rect.setAttribute('fill', 'transparent');
+                rect.setAttribute('stroke-width', '2');
+            }
+            if (on) {
                 const img = document.getElementById('vhScreenshot') || document.querySelector('#vhPanel img');
                 if (img) img.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
@@ -9449,16 +9501,14 @@
             const legendEl = document.getElementById('dynamicLegend');
             if (legendEl) {
                 legendEl.innerHTML = '';
-                const seen = {};
                 _vhRegions.forEach((r, idx) => {
-                    if (seen[r.color]) return;
-                    seen[r.color] = true;
+                    const rank = r.rank || (idx + 1);
                     legendEl.innerHTML += `
-                        <div style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;"
+                        <div style="display:flex; align-items:center; gap:0.4rem; cursor:pointer; padding:0.1rem 0;"
                              onclick="toggleRegionHighlight(${idx})"
-                             title="Click to highlight">
-                            <div style="width:22px; height:16px; border:2px solid ${r.color}; border-radius:3px; background:${r.color}22;"></div>
-                            <span style="color:#ccc; font-size:0.82rem;">${r.name}</span>
+                             title="Click to highlight on screenshot">
+                            <span style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:${r.color}; color:#fff; font-size:0.6rem; font-weight:700; flex-shrink:0;">${rank}</span>
+                            <span style="color:#ccc; font-size:0.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.name}</span>
                         </div>`;
                 });
             }
@@ -9471,25 +9521,41 @@
                     flowEl.innerHTML = _vhRegions.map((region, i) => {
                         const d = region.data || {};
                         const cleanText = (d.text || '').replace(/\s+/g, ' ').trim();
-                        const label = cleanText ? cleanText.substring(0, 50) + (cleanText.length > 50 ? '...' : '') : (d.selector || d.tag || 'element');
+                        const label = cleanText ? cleanText.substring(0, 40) + (cleanText.length > 40 ? '…' : '') : (d.selector || d.tag || 'element');
+                        const rank = region.rank || (i + 1);
+                        const pct = d.weightPct || 0;
+                        // Fold indicator
+                        const foldIcon = d.aboveFold ? '▲' : '▼';
+                        const foldColor = d.aboveFold ? '#69f0ae' : '#555';
                         return `
                         <div data-flow-id="${i}" style="
                             padding: 0.5rem 0.6rem;
-                            margin-bottom: 0.25rem;
+                            margin-bottom: 0.2rem;
                             border-left: 3px solid transparent;
                             border-radius: 0 6px 6px 0;
                             cursor: pointer;
                             transition: background 0.15s, border-color 0.15s;
                             font-size: 0.82rem;
                             color: #bbb;
-                            display: flex;
-                            align-items: center;
-                            gap: 0.5rem;
                         "
                         onmouseenter="if (_vhActiveHighlight !== ${i}) { highlightRegionRect(${i}, true); this.style.background='rgba(255,255,255,0.06)'; this.style.borderLeftColor='${region.color}'; }"
                         onmouseleave="if (_vhActiveHighlight !== ${i}) { highlightRegionRect(${i}, false); this.style.background='transparent'; this.style.borderLeftColor='transparent'; }"
                         onclick="toggleRegionHighlight(${i});"
-                        ><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${region.color}; flex-shrink:0;"></span><span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${region.name} — ${label}</span>${d.state && d.state.has_state_change ? '<span title="Has interactive states (hover/focus)" style="font-size:0.75rem; flex-shrink:0;">&#9889;</span>' : ''}<span style="color:#555; font-size:0.7rem; flex-shrink:0;">${d.size || ''}</span></div>`;
+                        >
+                            <div style="display:flex; align-items:center; gap:0.45rem;">
+                                <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:${region.color}; color:#fff; font-size:0.65rem; font-weight:700; flex-shrink:0;">${rank}</span>
+                                <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500;">${region.name}</span>
+                                ${d.state && d.state.has_state_change ? '<span title="Has interactive states" style="font-size:0.72rem; flex-shrink:0;">⚡</span>' : ''}
+                                <span style="color:${foldColor}; font-size:0.6rem; flex-shrink:0;" title="${d.aboveFold ? 'Above fold' : 'Below fold'}">${foldIcon}</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:0.4rem; margin-top:0.25rem; padding-left:25px;">
+                                <div style="flex:1; height:3px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
+                                    <div style="width:${pct}%; height:100%; background:${region.color}; border-radius:2px;"></div>
+                                </div>
+                                <span style="font-size:0.65rem; color:#666; flex-shrink:0; min-width:28px; text-align:right;">${pct}%</span>
+                                <span style="color:#444; font-size:0.6rem; flex-shrink:0;">${d.size || ''}</span>
+                            </div>
+                        </div>`;
                     }).join('');
                 } else {
                     flowEl.innerHTML = '<p style="color:#666;">No flow data</p>';
