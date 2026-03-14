@@ -4130,7 +4130,7 @@
                 {
                     name: 'Integration & APIs',
                     metrics: [
-                        { key: 'api_patterns', icon: '📡', title: 'API Patterns' },
+                        { key: 'api_patterns', icon: '📡', title: 'API Map' },
                         { key: 'third_party', icon: '🔌', title: 'Third-Party' }
                     ]
                 }
@@ -4866,7 +4866,7 @@
                     name: 'Integration & APIs',
                     icon: '📡',
                     metrics: [
-                        { key: 'api_patterns', icon: '📡', title: 'API Patterns' },
+                        { key: 'api_patterns', icon: '📡', title: 'API Map' },
                         { key: 'third_party', icon: '🔌', title: 'Third-Party' }
                     ]
                 }
@@ -5298,6 +5298,8 @@
                 bodyHTML = createCSSSpecificityCard(icon, title, data, confidenceClass);
             } else if (title === 'Site Topology') {
                 bodyHTML = createInformationArchitectureCard(icon, title, data, confidenceClass);
+            } else if (title === 'API Map' || title === 'API Patterns') {
+                bodyHTML = createAPIMapCard(icon, title, data, confidenceClass);
             } else {
                 bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
             }
@@ -5486,6 +5488,16 @@
                 }
                 case 'Token Taxonomy':
                     return safeDisplayValue(data.pattern);
+                case 'API Map':
+                case 'API Patterns': {
+                    const rm = data.relationship_map || {};
+                    const sem = rm.semantic_classification || {};
+                    const st = rm.stats || {};
+                    const cats = Object.keys(sem).filter(k => k !== 'unclassified' && (sem[k]||[]).length > 0);
+                    const total = st.unique_endpoints || (data.details ? (data.details.rest_apis||[]).length + (data.details.graphql||[]).length : 0);
+                    if (cats.length > 0) return `${total} endpoints: ${cats.join(', ')}`;
+                    return total > 0 ? `${total} API endpoints detected` : safeDisplayValue(data.pattern);
+                }
                 case 'Site Topology':
                 case 'Information Architecture':
                     if (data.total_pages) return `${data.total_pages} pages, ${(data.sections||[]).length} sections`;
@@ -8158,6 +8170,178 @@
                 ${patternsHTML}
                 ${!isSinglePage ? techHTML : ''}
                 ${urlSource !== 'unknown' ? '<div style="text-align:right; margin-top:0.3rem;"><span style="font-size:0.56rem; color:#444; background:rgba(255,255,255,0.03); padding:2px 6px; border-radius:4px;">via ' + sourceLabel + '</span></div>' : ''}
+            `;
+        }
+
+        // ── API Map Card ────────────────────────────────────────────────
+        function createAPIMapCard(icon, title, data, confidenceClass) {
+            const rm = data.relationship_map || {};
+            const sem = rm.semantic_classification || {};
+            const stats = rm.stats || {};
+            const insights = rm.design_insights || {};
+            const redundant = rm.redundant_requests || [];
+            const details = data.details || {};
+            const totalEndpoints = stats.unique_endpoints || 0;
+            const totalCalls = stats.total_requests || 0;
+            const efficiency = stats.efficiency_score || 100;
+
+            // Category config — colors, icons, human labels
+            const catConfig = {
+                authentication: { icon: '🔐', color: '#ff6b6b', label: 'Auth & Identity' },
+                content:        { icon: '📝', color: '#7ec8e3', label: 'Content' },
+                user:           { icon: '👤', color: '#c9b8ff', label: 'User Data' },
+                monetization:   { icon: '💳', color: '#ff9f0a', label: 'Monetization' },
+                interaction:    { icon: '💬', color: '#68d68d', label: 'Interaction' },
+                search:         { icon: '🔍', color: '#6c9eff', label: 'Search' },
+                analytics:      { icon: '📊', color: '#ff8fa3', label: 'Analytics & Tracking' },
+                config:         { icon: '⚙️', color: '#a0a0a0', label: 'Config & Consent' },
+                feature_flags:  { icon: '🧪', color: '#f09dff', label: 'Experiments' },
+                advertising:    { icon: '📢', color: '#ffb347', label: 'Advertising' },
+                unclassified:   { icon: '📦', color: '#555',    label: 'Other' }
+            };
+
+            // ── Hero stats ──
+            const effColor = efficiency >= 90 ? '#68d68d' : efficiency >= 70 ? '#ff9f0a' : '#ff6b6b';
+            const heroHTML = `
+                <div style="display:flex; align-items:baseline; gap:0.6rem; margin-bottom:0.75rem;">
+                    <span style="font-size:2rem; font-weight:800; color:#7ec8e3; line-height:1;">${totalEndpoints}</span>
+                    <span style="font-size:0.78rem; color:#888;">endpoints</span>
+                    <span style="font-size:0.78rem; color:#555;">·</span>
+                    <span style="font-size:1.4rem; font-weight:700; color:#c9b8ff;">${totalCalls}</span>
+                    <span style="font-size:0.78rem; color:#888;">calls</span>
+                    <span style="font-size:0.78rem; color:#555;">·</span>
+                    <span style="font-size:1.4rem; font-weight:700; color:${effColor};">${efficiency}%</span>
+                    <span style="font-size:0.78rem; color:#888;">efficient</span>
+                </div>
+            `;
+
+            // ── Protocol badge ──
+            const hasGraphQL = (details.graphql || []).length > 0;
+            const hasWS = (details.websockets || []).length > 0;
+            const hasREST = (details.rest_apis || []).length > 0;
+            const protocols = [];
+            if (hasREST)    protocols.push({ label: 'REST', color: '#6c9eff' });
+            if (hasGraphQL) protocols.push({ label: 'GraphQL', color: '#f09dff' });
+            if (hasWS)      protocols.push({ label: 'WebSocket', color: '#68d68d' });
+            const protocolHTML = protocols.length > 0 ? `
+                <div style="display:flex; gap:5px; margin-bottom:0.75rem;">
+                    ${protocols.map(function(p) { return '<span style="display:inline-block; background:' + p.color + '18; border:1px solid ' + p.color + '44; color:' + p.color + '; font-size:0.68rem; font-weight:600; padding:2px 10px; border-radius:14px;">' + p.label + '</span>'; }).join('')}
+                </div>
+            ` : '';
+
+            // ── Semantic groups — the main content ──
+            const semEntries = Object.entries(sem).filter(function(e) { return (e[1]||[]).length > 0; });
+            // Sort: classified categories first, unclassified last
+            semEntries.sort(function(a, b) {
+                if (a[0] === 'unclassified') return 1;
+                if (b[0] === 'unclassified') return -1;
+                return (b[1]||[]).length - (a[1]||[]).length;
+            });
+
+            const groupsHTML = semEntries.length > 0 ? `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">API Resources</div>
+                    ${semEntries.map(function(entry) {
+                        var cat = entry[0];
+                        var endpoints = entry[1];
+                        var cfg = catConfig[cat] || catConfig.unclassified;
+                        var count = endpoints.length;
+                        var calls = endpoints.reduce(function(s, e) { return s + (e.call_count || 1); }, 0);
+                        var togId = 'api-grp-' + Math.random().toString(36).slice(2, 8);
+
+                        // Build expandable endpoint list
+                        var epList = endpoints.slice(0, 8).map(function(ep) {
+                            var method = ep.method || 'GET';
+                            var methodColor = method === 'GET' ? '#68d68d' : method === 'POST' ? '#6c9eff' : method === 'PUT' ? '#ff9f0a' : method === 'DELETE' ? '#ff6b6b' : '#888';
+                            var path = ep.path || '';
+                            // Trim to last meaningful segment
+                            if (path.length > 45) path = '...' + path.slice(-42);
+                            return '<div style="display:flex; align-items:center; gap:6px; padding:2px 0;">' +
+                                '<span style="font-size:0.58rem; font-weight:700; color:' + methodColor + '; width:30px; flex-shrink:0; font-family:\'SF Mono\',monospace;">' + method + '</span>' +
+                                '<span style="flex:1; font-size:0.66rem; color:#aaa; font-family:\'SF Mono\',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + path + '</span>' +
+                                '<span style="font-size:0.58rem; color:#555; flex-shrink:0;">×' + (ep.call_count || 1) + '</span>' +
+                            '</div>';
+                        }).join('');
+                        if (endpoints.length > 8) epList += '<div style="font-size:0.6rem; color:#555; padding-top:2px;">+' + (endpoints.length - 8) + ' more</div>';
+
+                        return '<div style="margin-bottom:4px;">' +
+                            '<button onclick="var el=document.getElementById(\'' + togId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\';"' +
+                                ' style="width:100%; background:rgba(255,255,255,0.03); border:none; border-radius:6px; padding:6px 8px; cursor:pointer; display:flex; align-items:center; gap:6px; color:#ccc; text-align:left;">' +
+                                '<span style="font-size:0.85rem;">' + cfg.icon + '</span>' +
+                                '<span style="flex:1; font-size:0.75rem; font-weight:600; color:' + cfg.color + ';">' + cfg.label + '</span>' +
+                                '<span style="font-size:0.62rem; color:#888; background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:3px;">' + count + ' endpoint' + (count !== 1 ? 's' : '') + '</span>' +
+                                '<span style="font-size:0.62rem; color:#555;">' + calls + ' calls</span>' +
+                            '</button>' +
+                            '<div id="' + togId + '" style="display:none; padding:4px 8px 4px 28px;">' + epList + '</div>' +
+                        '</div>';
+                    }).join('')}
+                </div>
+            ` : '';
+
+            // ── Design insights ──
+            const insightEntries = Object.entries(insights).filter(function(e) { return e[0] !== 'notes'; });
+            const notes = insights.notes || [];
+            const insightsHTML = (insightEntries.length > 0 || notes.length > 0) ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:0.5rem; margin-bottom:0.5rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Architecture Insights</div>
+                    ${insightEntries.map(function(e) {
+                        return '<div style="font-size:0.7rem; color:#ccc; padding:2px 0;"><span style="color:#6c9eff;">▸</span> ' + e[1] + '</div>';
+                    }).join('')}
+                    ${notes.map(function(n) {
+                        return '<div style="font-size:0.66rem; color:#888; padding:1px 0;">· ' + n + '</div>';
+                    }).join('')}
+                </div>
+            ` : '';
+
+            // ── Redundant call warnings ──
+            const redHTML = redundant.length > 0 ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:0.5rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Optimization Opportunities</div>
+                    ${redundant.slice(0, 3).map(function(r) {
+                        var path = r.url || '';
+                        try { path = new URL(r.url).pathname; } catch(e) {}
+                        if (path.length > 40) path = '...' + path.slice(-37);
+                        return '<div style="display:flex; align-items:center; gap:6px; padding:2px 0;">' +
+                            '<span style="font-size:0.7rem; color:#ff9f0a;">⚠</span>' +
+                            '<span style="flex:1; font-size:0.66rem; color:#aaa; font-family:\'SF Mono\',monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + path + '</span>' +
+                            '<span style="font-size:0.6rem; color:#ff6b6b;">' + (r.wasted_calls || r.call_count - 1) + ' redundant</span>' +
+                        '</div>';
+                    }).join('')}
+                    ${redundant.length > 3 ? '<div style="font-size:0.6rem; color:#555;">+' + (redundant.length - 3) + ' more</div>' : ''}
+                </div>
+            ` : '';
+
+            // ── Fallback: if no relationship_map, show raw endpoint list ──
+            const fallbackHTML = (totalEndpoints === 0 && ((details.rest_apis||[]).length > 0 || (details.graphql||[]).length > 0)) ? `
+                <div style="margin-bottom:0.75rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Detected Endpoints</div>
+                    ${(details.rest_apis || []).slice(0, 6).map(function(url) {
+                        var path = url;
+                        try { path = new URL(url).pathname; } catch(e) {}
+                        if (path.length > 50) path = '...' + path.slice(-47);
+                        return '<div style="font-size:0.66rem; color:#6c9eff; font-family:\'SF Mono\',monospace; padding:1px 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + path + '</div>';
+                    }).join('')}
+                    ${(details.graphql || []).slice(0, 3).map(function(url) {
+                        return '<div style="font-size:0.66rem; color:#f09dff; font-family:\'SF Mono\',monospace; padding:1px 0;">GraphQL: ' + url.substring(0, 50) + '</div>';
+                    }).join('')}
+                </div>
+            ` : '';
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        API Map
+                        ${createInfoIcon('api_patterns', data.confidence)}
+                    </div>
+                    <div class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</div>
+                </div>
+                ${heroHTML}
+                ${protocolHTML}
+                ${groupsHTML}
+                ${fallbackHTML}
+                ${insightsHTML}
+                ${redHTML}
             `;
         }
 

@@ -108,36 +108,59 @@ class APIRelationshipMapper:
 
     def _classify_semantic_roles(self, endpoints: List[Dict]) -> Dict:
         """
-        Classify APIs by design role (state, content, interaction, monetization, infrastructure)
+        Classify APIs by design role — matches on path keywords, path prefixes,
+        and domain patterns (for third-party analytics/tracking services).
         """
         PATTERNS = {
             'authentication': {
                 'keywords': ['auth', 'login', 'logout', 'token', 'oauth', 'session', 'jwt', 'signup', 'register', 'password'],
                 'paths': ['/auth', '/login', '/logout', '/token', '/signup'],
+                'domains': [],
             },
             'content': {
-                'keywords': ['article', 'post', 'blog', 'content', 'page', 'story', 'news', 'feed'],
-                'paths': ['/articles', '/posts', '/content', '/pages'],
+                'keywords': ['article', 'post', 'blog', 'content', 'page', 'story', 'news', 'feed', 'cms'],
+                'paths': ['/articles', '/posts', '/content', '/pages', '/stories'],
+                'domains': [],
             },
             'user': {
-                'keywords': ['user', 'profile', 'account', 'me', 'member'],
+                'keywords': ['user', 'profile', 'account', 'me', 'member', 'preferences'],
                 'paths': ['/users', '/profile', '/me', '/account'],
+                'domains': [],
             },
             'monetization': {
-                'keywords': ['paywall', 'subscription', 'offer', 'payment', 'billing', 'plan', 'price'],
-                'paths': ['/subscribe', '/billing', '/plans', '/offers'],
+                'keywords': ['paywall', 'subscription', 'offer', 'payment', 'billing', 'plan', 'price', 'checkout', 'cart', 'order', 'invoice'],
+                'paths': ['/subscribe', '/billing', '/plans', '/offers', '/checkout', '/cart'],
+                'domains': [],
             },
             'interaction': {
-                'keywords': ['comment', 'like', 'share', 'follow', 'vote', 'react', 'reply'],
-                'paths': ['/comments', '/likes', '/reactions'],
+                'keywords': ['comment', 'like', 'share', 'follow', 'vote', 'react', 'reply', 'notification'],
+                'paths': ['/comments', '/likes', '/reactions', '/notifications'],
+                'domains': [],
             },
             'search': {
-                'keywords': ['search', 'query', 'find', 'suggest', 'autocomplete'],
-                'paths': ['/search', '/query', '/suggest'],
+                'keywords': ['search', 'query', 'find', 'suggest', 'autocomplete', 'typeahead'],
+                'paths': ['/search', '/query', '/suggest', '/autocomplete'],
+                'domains': [],
+            },
+            'analytics': {
+                'keywords': ['collect', 'track', 'event', 'beacon', 'pixel', 'pageview', 'page_view', 'impression', 'analytics', 'telemetry', 'metrics', 'log', 'ingest'],
+                'paths': ['/collect', '/track', '/events', '/beacon', '/pixel', '/ingest', '/activity'],
+                'domains': ['google-analytics', 'googletagmanager', 'analytics', 'segment', 'mixpanel', 'amplitude', 'hotjar', 'fullstory', 'heap', 'sentry', 'datadoghq', 'newrelic', 'marketo', 'hubspot'],
+            },
+            'config': {
+                'keywords': ['config', 'settings', 'cookie', 'consent', 'enforcement', 'initialize', 'bootstrap', 'manifest'],
+                'paths': ['/config', '/settings', '/cookie-settings', '/consent'],
+                'domains': ['onetrust', 'cookiebot', 'trustarc'],
             },
             'feature_flags': {
-                'keywords': ['flag', 'experiment', 'variant', 'feature', 'ab', 'cohort'],
-                'paths': ['/flags', '/experiments', '/features'],
+                'keywords': ['flag', 'experiment', 'variant', 'feature', 'ab', 'cohort', 'split', 'toggle'],
+                'paths': ['/flags', '/experiments', '/features', '/splits'],
+                'domains': ['launchdarkly', 'optimizely', 'split.io', 'statsig', 'flagsmith'],
+            },
+            'advertising': {
+                'keywords': ['ads', 'advert', 'campaign', 'attribution', 'conversion', 'retarget', 'remarketing', 'ddm', 'fls'],
+                'paths': ['/ads', '/attribution', '/conversion', '/ddm'],
+                'domains': ['doubleclick', 'googlesyndication', 'googleads', 'facebook.com/tr', 'ads.linkedin', 'bat.bing', 'ad.doubleclick'],
             },
         }
 
@@ -146,13 +169,19 @@ class APIRelationshipMapper:
 
         for endpoint in endpoints:
             full_url = endpoint.get('full_url', '')
+            url_lower = full_url.lower()
             path = endpoint.get('path', '').lower()
             matches = []
+
             for category, patterns in PATTERNS.items():
-                kw_score = sum(1 for kw in patterns['keywords'] if kw in full_url.lower())
+                kw_score = sum(1 for kw in patterns['keywords'] if kw in url_lower)
                 path_score = sum(1 for p in patterns['paths'] if path.startswith(p))
-                if kw_score >= 2 or path_score >= 1:
-                    matches.append((category, kw_score + path_score * 2))
+                domain_score = sum(1 for d in patterns.get('domains', []) if d in url_lower)
+
+                total = kw_score + path_score * 2 + domain_score * 3
+                # Match if: any path prefix matches, or domain matches, or 1+ keyword matches
+                if path_score >= 1 or domain_score >= 1 or kw_score >= 1:
+                    matches.append((category, total))
 
             if matches:
                 best = sorted(matches, key=lambda x: x[1], reverse=True)[0][0]
