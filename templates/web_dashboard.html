@@ -4250,6 +4250,30 @@
 
                 present.forEach(metric => {
                     const data = pageData[metric.key];
+
+                    // ── Route key cards through their specialized creators ──
+                    // These cards have rich, purpose-built renderers that are much
+                    // better than the generic inline template below.
+                    const _specializedKeys = new Set([
+                        'contrast_a11y', 'accessibility_tree', 'api_patterns',
+                        'motion_tokens', 'seo',
+                        'accessibility', 'interactive_elements', 'interaction_states',
+                        'cdp_animations', 'shadow_system', 'z_index_stack',
+                        'site_topology'
+                    ]);
+
+                    if (_specializedKeys.has(metric.key) && typeof createMetricCard === 'function') {
+                        try {
+                            const specialCard = createMetricCard(metric.icon, metric.title, data);
+                            if (specialCard) {
+                                grid.appendChild(specialCard);
+                                return;  // skip generic rendering
+                            }
+                        } catch (e) {
+                            console.warn(`Specialized card failed for ${metric.key}, falling back to generic:`, e);
+                        }
+                    }
+
                     const card = document.createElement('div');
                     card.style.cssText = 'background: var(--surface-1, #0a0a0a); padding: 1rem 1.25rem; border-radius: 8px; border: 1px solid var(--border-default, #333);';
 
@@ -8575,7 +8599,6 @@
                         <span class="metric-icon">${icon}</span>
                         ${title}
                     </div>
-                    <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
                 <div class="metric-body">
                     ${brandAssetsHTML}

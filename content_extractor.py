@@ -354,8 +354,32 @@ class IntelligentContentExtractor:
                 };
             }""")
 
+        elif page_type == PageType.LANDING_PAGE:
+            return await self.page.evaluate("""() => {
+                const main = document.querySelector('main') || document.body;
+                return {
+                    sections: main.querySelectorAll('section, [class*="section"]').length,
+                    headings: main.querySelectorAll('h1, h2, h3').length,
+                    images: main.querySelectorAll('img, picture, video').length,
+                    ctaButtons: main.querySelectorAll('a[class*="btn"], a[class*="button"], button:not([type="submit"])').length,
+                    links: main.querySelectorAll('a[href]').length,
+                    cards: main.querySelectorAll('[class*="card"], article, .item').length,
+                    forms: main.querySelectorAll('form').length
+                };
+            }""")
+
         else:
-            return {}
+            # Generic fallback — count the basics so we never return empty
+            return await self.page.evaluate("""() => {
+                const main = document.querySelector('main') || document.body;
+                return {
+                    sections: main.querySelectorAll('section').length,
+                    headings: main.querySelectorAll('h1, h2, h3').length,
+                    images: main.querySelectorAll('img').length,
+                    links: main.querySelectorAll('a[href]').length,
+                    paragraphs: main.querySelectorAll('p').length
+                };
+            }""")
 
     async def _extract_samples(self, page_type: PageType) -> List[Dict]:
         """
@@ -488,8 +512,38 @@ class IntelligentContentExtractor:
                 }));
             }""")
 
+        elif page_type == PageType.LANDING_PAGE:
+            return await self.page.evaluate("""() => {
+                const main = document.querySelector('main') || document.body;
+
+                // Find prominent sections with headings
+                const sections = Array.from(main.querySelectorAll('section, [class*="section"]')).slice(0, 5);
+                return sections.map((s, idx) => {
+                    const heading = s.querySelector('h1, h2, h3');
+                    const text = s.querySelector('p');
+                    const img = s.querySelector('img');
+                    const cta = s.querySelector('a[class*="btn"], a[class*="button"], button');
+                    return {
+                        name: heading?.innerText?.trim()?.substring(0, 80) || `Section ${idx + 1}`,
+                        text: text?.innerText?.trim()?.substring(0, 150) || '',
+                        image: img?.src || null,
+                        cta: cta?.innerText?.trim() || null,
+                        selector: s.className ? `.${s.className.split(' ')[0]}` : `section:nth-child(${idx + 1})`
+                    };
+                });
+            }""")
+
         else:
-            return []
+            # Generic fallback: grab the first few headings + surrounding content
+            return await self.page.evaluate("""() => {
+                const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 5);
+                return headings.map((h, idx) => ({
+                    name: h.innerText?.trim()?.substring(0, 80) || `Heading ${idx + 1}`,
+                    tag: h.tagName,
+                    text: h.nextElementSibling?.innerText?.trim()?.substring(0, 150) || '',
+                    selector: h.id ? `#${h.id}` : `${h.tagName.toLowerCase()}:nth-of-type(${idx + 1})`
+                }));
+            }""")
 
     async def _extraction_strategy(self, page_type: PageType) -> Dict:
         """
@@ -597,6 +651,19 @@ class IntelligentContentExtractor:
                     '✅ Audio/player elements associated with episodes',
                     '✅ Schema.org metadata detected'
                 ]
+            },
+            PageType.LANDING_PAGE: {
+                'primary_selector': 'section, [class*="section"]',
+                'fallback_selector': 'main > div',
+                'confidence': 'medium',
+                'reasoning': 'Landing page identified by section-based layout with CTAs and hero content',
+                'fields_extracted': ['sections', 'headings', 'ctas', 'images'],
+                'validation': [
+                    '✅ Page uses section-based layout',
+                    '✅ CTA buttons or prominent links detected',
+                    '⚠️ Content is structural (sections) not repeating items'
+                ],
+                'scaling_note': 'Landing pages are unique compositions — no repeating content pattern to extract at scale'
             }
         }
 
@@ -716,10 +783,12 @@ class IntelligentContentExtractor:
                 notes.push(`⚠️ Multiple h1 tags (${h1s} found)`);
             }
 
+            // Cap at 100 — additive signals can exceed if site has everything
+            const cappedScore = Math.min(score, 100);
             return {
                 tags,
-                score,
-                quality: score > 70 ? 'High' : score > 40 ? 'Medium' : 'Low',
+                score: cappedScore,
+                quality: cappedScore > 70 ? 'High' : cappedScore > 40 ? 'Medium' : 'Low',
                 notes,
                 ariaLabels
             };
