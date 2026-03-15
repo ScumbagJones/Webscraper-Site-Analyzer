@@ -1126,14 +1126,14 @@ class DeepEvidenceEngine:
             print(f"   📰 Analyzing content layout ({_content_type})...")
             evidence['content_layout'] = await safe_extract(
                 'Content Layout',
-                lambda: self._analyze_content_layout(page, _content_type)
+                self._analyze_content_layout, page, _content_type
             )
         elif _should_extract('content_extraction'):
             # Even if content extraction failed, try with generic type
             print(f"   📰 Analyzing content layout (generic)...")
             evidence['content_layout'] = await safe_extract(
                 'Content Layout',
-                lambda: self._analyze_content_layout(page, 'generic')
+                self._analyze_content_layout, page, 'generic'
             )
 
         # Design System Metrics — gate each sub-metric individually
@@ -2169,9 +2169,54 @@ class DeepEvidenceEngine:
                     print(f"   ⏭️  Web font wait timed out (no web fonts or slow loading)")
                     pass
 
-            # DEGRADED MODE: Use Metadata MRI Scanner
+            # DEGRADED MODE: Try Scrapling stealth before falling back to MRI
             if degraded_mode:
                 await browser.close()
+
+                # Phase 2: Try Scrapling StealthyFetcher (stealth browser with anti-detection)
+                try:
+                    from scrapling import StealthyFetcher
+                    print(f"   🥷 Patchright blocked — trying Scrapling stealth browser...")
+
+                    async def _scrapling_page_action(page):
+                        """Run inside Scrapling's stealth browser — extract full evidence"""
+                        await page.wait_for_load_state('domcontentloaded')
+                        await asyncio.sleep(3)  # Let JS render
+
+                        # Check if we actually got the real page
+                        _html = await page.content()
+                        if self._is_challenge_page(_html):
+                            print(f"   🛡️  Scrapling also blocked by challenge page")
+                            return None
+
+                        print(f"   ✅ Scrapling stealth access succeeded!")
+                        # Run full single-page analysis inside the stealth browser
+                        self.evidence = await self._analyze_single_page(page, self.url, _html)
+                        self.evidence['access_strategy'] = 'scrapling_stealth'
+                        return True
+
+                    _result_holder = [None]
+
+                    async def _page_action_wrapper(page):
+                        _result_holder[0] = await _scrapling_page_action(page)
+
+                    fetcher = StealthyFetcher()
+                    await fetcher.async_fetch(
+                        self.url,
+                        headless=True,
+                        page_action=_page_action_wrapper,
+                        timeout=90000,  # 90s — sacurrent etc. are slow behind bot walls
+                    )
+
+                    if _result_holder[0] and self.evidence:
+                        return self.evidence
+
+                except ImportError:
+                    print(f"   ⚠️  Scrapling not installed — falling back to MRI")
+                except Exception as e:
+                    print(f"   ⚠️  Scrapling stealth failed: {str(e)[:100]} — falling back to MRI")
+
+                # Final fallback: MRI metadata-only scan
                 print(f"   🔬 Running Metadata MRI scan...")
                 return await self._mri_scan()
 

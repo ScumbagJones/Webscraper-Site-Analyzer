@@ -172,8 +172,26 @@ def deep_scan():
         print("\n✅ Deep scan complete!")
         print(f"   Extracted {len(evidence)} metric categories")
 
-        # Clean up evidence (remove None values, errors)
-        cleaned_evidence = {k: v for k, v in evidence.items() if v is not None}
+        # Clean up evidence (remove None values, errors, unawaited coroutines)
+        import inspect
+        cleaned_evidence = {}
+        for k, v in evidence.items():
+            if v is None:
+                continue
+            if inspect.iscoroutine(v):
+                print(f"   ⚠️  Skipping coroutine in evidence['{k}'] — likely missing await")
+                continue
+            # Check nested dicts for coroutines
+            if isinstance(v, dict):
+                cleaned_v = {}
+                for k2, v2 in v.items():
+                    if inspect.iscoroutine(v2):
+                        print(f"   ⚠️  Skipping coroutine in evidence['{k}']['{k2}'] — likely missing await")
+                    else:
+                        cleaned_v[k2] = v2
+                cleaned_evidence[k] = cleaned_v
+            else:
+                cleaned_evidence[k] = v
 
         return jsonify({
             'success': True,
