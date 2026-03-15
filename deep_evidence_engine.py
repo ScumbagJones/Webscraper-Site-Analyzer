@@ -102,6 +102,8 @@ class DeepEvidenceEngine:
         self.analysis_mode = analysis_mode
         self.discovery_method = discovery_method
         self.evidence = {}
+        self._cloudflare_urls = []
+        self._cloudflare_pages = {}
 
     def _add_statistical_fields(self, evidence: Dict, sample_size: int = None,
                                 variance: float = None, observed: bool = True,
@@ -696,18 +698,242 @@ class DeepEvidenceEngine:
                 await browser.close()
 
     async def _discover_via_cloudflare(self, url: str, limit: int = 50) -> List[str]:
-        """Try Cloudflare crawl for URL discovery; returns [] if unavailable."""
+        """Try Cloudflare crawl for URL discovery; returns [] if unavailable.
+
+        Now does a FULL crawl (URLs + page content) and caches the content
+        in self._cloudflare_pages for downstream use (topology, content
+        classification, cross-site component detection).
+        """
         try:
             from cloudflare_crawl import CloudflareCrawler, is_cloudflare_available
             if not is_cloudflare_available():
                 return []
-            print("   ☁️  Attempting Cloudflare URL discovery...")
+            print("   ☁️  Attempting Cloudflare URL discovery (full crawl)...")
             crawler = CloudflareCrawler()
-            urls = await crawler.discover_urls(url, limit=limit, depth=2)
+            result = await crawler.crawl(url, limit=limit, depth=2,
+                                         formats=['markdown', 'html'], render=False)
+            urls = result.get('urls', [])
+            # Cache page content for downstream enrichment
+            pages = result.get('pages', [])
+            self._cloudflare_pages = {}
+            for p in pages:
+                page_url = p.get('url') or p.get('sourceURL', '')
+                if page_url:
+                    self._cloudflare_pages[page_url] = {
+                        'markdown': p.get('markdown', p.get('content', '')),
+                        'html': p.get('html', ''),
+                        'title': p.get('title', ''),
+                    }
+            print(f"   ☁️  Cloudflare: {len(urls)} URLs, {len(self._cloudflare_pages)} pages with content")
             return urls or []
         except Exception as e:
             print(f"   ⚠️  Cloudflare discovery unavailable: {str(e)[:100]}")
             return []
+
+    def _build_url_inventory(self, urls: List[str], base_url: str,
+                              sources: Dict[str, List[str]] = None) -> Dict:
+        """
+        Build a structured URL inventory for the user — surfaces the full
+        pool of discovered URLs with categorization and source attribution.
+
+        This is the "why didn't we show the user all the URLs?" fix:
+        previously Cloudflare discovered 200+ URLs but only the 3-5
+        selected pages were visible in evidence.
+
+        Returns:
+            {
+                total: int,
+                by_section: { '/products': [...], '/docs': [...], ... },
+                by_source: { 'cloudflare': 150, 'interactive': 67 },
+                urls: [ { url, section, depth, source } ],
+                coverage_note: str
+            }
+        """
+        from urllib.parse import urlparse
+
+        parsed_base = urlparse(base_url)
+        sources = sources or {}
+
+        # Build source lookup: which source discovered each URL
+        url_sources = {}
+        for source_name, source_urls in sources.items():
+            for u in source_urls:
+                if u not in url_sources:
+                    url_sources[u] = source_name
+                else:
+                    url_sources[u] += f'+{source_name}'  # found by both
+
+        # Categorize URLs by first path segment
+        by_section = {}
+        inventory_items = []
+
+        for url in sorted(set(urls)):
+            try:
+                parsed = urlparse(url)
+                if parsed.netloc != parsed_base.netloc:
+                    continue  # Skip external URLs
+                segments = [s for s in parsed.path.split('/') if s]
+                section = f'/{segments[0]}' if segments else '/'
+                depth = len(segments)
+
+                by_section.setdefault(section, []).append(url)
+                inventory_items.append({
+                    'url': url,
+                    'section': section,
+                    'depth': depth,
+                    'source': url_sources.get(url, 'unknown'),
+                })
+            except Exception:
+                continue
+
+        # Source counts
+        by_source = {}
+        for item in inventory_items:
+            src = item['source'].split('+')[0]  # primary source
+            by_source[src] = by_source.get(src, 0) + 1
+
+        # Section summary (top 10 sections by count)
+        section_summary = sorted(
+            [(section, len(urls_list)) for section, urls_list in by_section.items()],
+            key=lambda x: x[1], reverse=True
+        )[:10]
+
+        total = len(inventory_items)
+        sections_count = len(by_section)
+
+        return {
+            'total': total,
+            'sections_count': sections_count,
+            'section_summary': [{'section': s, 'count': c} for s, c in section_summary],
+            'by_source': by_source,
+            'urls': inventory_items[:500],  # Cap at 500 to avoid payload bloat
+            'coverage_note': (
+                f"{total} URLs across {sections_count} sections. "
+                f"Sources: {', '.join(f'{k}({v})' for k, v in by_source.items())}."
+            ),
+        }
+
+    def _classify_cloudflare_pages(self, cf_pages: Dict[str, Dict], base_url: str) -> Dict:
+        """
+        Lightweight content classification on Cloudflare-fetched page content.
+
+        Doesn't need Playwright — just parses markdown/HTML for structural signals
+        (headings, product selectors, article tags, form elements).
+
+        Returns:
+            {
+                total_pages: int,
+                page_types: { 'product': 12, 'article': 8, 'docs': 15, ... },
+                distribution_pct: { 'product': '24%', ... },
+                samples: { 'product': ['url1', 'url2'], ... },
+                pattern: str
+            }
+        """
+        import re
+        from urllib.parse import urlparse
+
+        type_counts = {}
+        type_samples = {}
+        total = 0
+
+        for url, content_data in cf_pages.items():
+            md = content_data.get('markdown', '') or ''
+            html = content_data.get('html', '') or ''
+            combined = md + html
+            if len(combined) < 50:
+                continue  # Skip empty/error pages
+
+            total += 1
+            page_type = self._classify_page_content_lightweight(url, md, html)
+            type_counts[page_type] = type_counts.get(page_type, 0) + 1
+            type_samples.setdefault(page_type, [])
+            if len(type_samples[page_type]) < 3:
+                type_samples[page_type].append(url)
+
+        if total == 0:
+            return {'total_pages': 0, 'page_types': {}, 'pattern': 'No content available'}
+
+        # Distribution percentages
+        distribution = {
+            ptype: f"{round(count / total * 100)}%"
+            for ptype, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
+        }
+
+        # Top type
+        top_type = max(type_counts, key=type_counts.get) if type_counts else 'unknown'
+
+        return {
+            'total_pages': total,
+            'page_types': type_counts,
+            'distribution_pct': distribution,
+            'samples': type_samples,
+            'pattern': f"{total} pages classified — {top_type} dominant ({distribution.get(top_type, '?')})",
+            'confidence': min(90, 50 + total),  # More pages = higher confidence
+        }
+
+    def _classify_page_content_lightweight(self, url: str, markdown: str, html: str) -> str:
+        """
+        Classify a single page by type using URL path + content signals.
+        Lightweight — no Playwright, just text/pattern matching.
+        """
+        import re
+        from urllib.parse import urlparse
+
+        path = urlparse(url).path.lower()
+        md_lower = markdown.lower()
+        html_lower = html.lower()
+
+        # URL path signals (strongest)
+        if re.search(r'/blog/|/posts?/|/articles?/', path):
+            return 'article'
+        if re.search(r'/docs?/|/documentation/|/guide/', path):
+            return 'documentation'
+        if re.search(r'/products?/|/shop/|/store/', path):
+            return 'product'
+        if re.search(r'/pricing/', path):
+            return 'pricing'
+        if re.search(r'/about/', path):
+            return 'about'
+        if re.search(r'/contact/', path):
+            return 'contact'
+        if re.search(r'/faq/', path):
+            return 'faq'
+        if re.search(r'/careers?|/jobs?/', path):
+            return 'careers'
+        if re.search(r'/legal|/privacy|/terms/', path):
+            return 'legal'
+
+        # Content signals (when path is ambiguous)
+        # Product: price indicators, add-to-cart
+        if re.search(r'\$\d+|\bprice\b|add.to.cart|buy.now', md_lower):
+            return 'product'
+
+        # Article: long-form text with headings
+        heading_count = len(re.findall(r'^#{1,3}\s', markdown, re.MULTILINE))
+        word_count = len(markdown.split())
+        if heading_count >= 3 and word_count > 500:
+            return 'article'
+
+        # Documentation: code blocks, API references
+        code_blocks = len(re.findall(r'```', markdown))
+        if code_blocks >= 2 or re.search(r'api.reference|code.example|endpoint', md_lower):
+            return 'documentation'
+
+        # Landing: hero patterns, CTAs
+        if re.search(r'get.started|sign.up|learn.more|free.trial', md_lower):
+            return 'landing'
+
+        # Form-heavy
+        if html_lower.count('<form') >= 1 or html_lower.count('<input') >= 3:
+            return 'form'
+
+        # Default by content length
+        if word_count > 300:
+            return 'content'
+        elif word_count < 50:
+            return 'minimal'
+
+        return 'other'
 
     async def multi_scan(self, urls: List[str], analysis_focus: str = 'full') -> Dict:
         """
@@ -1286,6 +1512,14 @@ class DeepEvidenceEngine:
             topo = SiteTopologyAnalyzer()
             synthesis['site_topology'] = topo.analyze(
                 list(all_cross_urls), base_url, url_source=_topo_source
+            )
+
+        # ── Site Content Profile (from Cloudflare page content) ──
+        # When Cloudflare cached page content, classify pages by type to give
+        # a site-level content breakdown (e.g., "45% product, 30% docs, 25% other")
+        if hasattr(self, '_cloudflare_pages') and self._cloudflare_pages:
+            synthesis['site_content_profile'] = self._classify_cloudflare_pages(
+                self._cloudflare_pages, base_url
             )
 
         return synthesis
@@ -1983,6 +2217,19 @@ class DeepEvidenceEngine:
                 # Synthesize multi-page insights
                 self.evidence = self._synthesize_multi_page(page_results, mode='smart-nav')
                 self.evidence['urls_discovered'] = urls_to_analyze
+                # Surface full URL inventory (Cloudflare pool or nav-discovered URLs)
+                _cf_pool = self._cloudflare_urls if hasattr(self, '_cloudflare_urls') and self._cloudflare_urls else []
+                if _cf_pool:
+                    self.evidence['url_inventory'] = self._build_url_inventory(
+                        _cf_pool, self.url,
+                        sources={'cloudflare': _cf_pool, 'nav': list(urls_to_analyze.values())}
+                    )
+                    self.evidence['discovery_metadata'] = {
+                        'total_discovered': len(_cf_pool),
+                        'cloudflare_amplified': True,
+                        'cloudflare_urls': len(_cf_pool),
+                        'pages_analyzed': len(urls_to_analyze),
+                    }
 
             elif self.analysis_mode == 'interactive':
                 # Interactive discovery: click menus, discover pages, select diverse subset, analyze
@@ -1995,8 +2242,24 @@ class DeepEvidenceEngine:
                 # Phase 1: Discover all links (static + interactive)
                 discovery = await self._discover_interactive_links(page, self.url)
 
-                # Phase 2: Select diverse subset
+                # Phase 1.5: Amplify with Cloudflare (if available)
+                # Interactive discovery finds 20-60 URLs from clicking menus on one page.
+                # Cloudflare can find 200-1000+ URLs across the whole site in ~10 seconds.
+                # Merge both pools so _select_diverse_pages picks from the richest set.
                 all_urls = [l['url'] if isinstance(l, dict) else l for l in discovery['all_links']]
+                _cf_amplified = False
+                if self.discovery_method in ('cloudflare', 'auto'):
+                    cf_urls = await self._discover_via_cloudflare(self.url, limit=100)
+                    if cf_urls and len(cf_urls) > 0:
+                        _pre_merge = len(set(all_urls))
+                        all_urls = list(set(all_urls + cf_urls))
+                        _post_merge = len(all_urls)
+                        _cf_new = _post_merge - _pre_merge
+                        print(f"   ☁️  Cloudflare amplified: {_pre_merge} interactive → {_post_merge} total (+{_cf_new} new)")
+                        self._cloudflare_urls = cf_urls
+                        _cf_amplified = True
+
+                # Phase 2: Select diverse subset from the merged pool
                 selected = self._select_diverse_pages(all_urls, self.url, max_pages=5)
 
                 # Phase 3: Analyze each selected page
@@ -2030,11 +2293,21 @@ class DeepEvidenceEngine:
                 self.evidence = self._synthesize_multi_page(page_results, mode='interactive')
                 self.evidence['urls_discovered'] = selected
                 self.evidence['discovery_metadata'] = {
-                    'total_discovered': discovery['total_unique'],
+                    'total_discovered': len(all_urls),
                     'static_count': discovery['total_static'],
                     'interactive_count': discovery['total_interactive'],
+                    'cloudflare_amplified': _cf_amplified,
+                    'cloudflare_urls': len(self._cloudflare_urls) if hasattr(self, '_cloudflare_urls') and self._cloudflare_urls else 0,
                     'interaction_log': discovery['interaction_log'],
                 }
+                # Surface full URL inventory for user visibility
+                self.evidence['url_inventory'] = self._build_url_inventory(
+                    all_urls, self.url,
+                    sources={
+                        'interactive': [l['url'] if isinstance(l, dict) else l for l in discovery['all_links']],
+                        'cloudflare': self._cloudflare_urls if hasattr(self, '_cloudflare_urls') and self._cloudflare_urls else [],
+                    }
+                )
 
             await browser.close()
 

@@ -3623,14 +3623,24 @@
 
             grid.appendChild(summaryCard);
 
-            // Discovery metadata (Interactive Discovery mode)
+            // Discovery metadata (Interactive / Smart-Nav with Cloudflare)
             if (evidence.discovery_metadata) {
                 const dm = evidence.discovery_metadata;
                 const discoveryBar = document.createElement('div');
                 discoveryBar.style.cssText = 'grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: rgba(10,132,255,0.06); border: 1px solid rgba(10,132,255,0.15); border-radius: var(--radius-md); font-size: var(--text-sm); align-items: center;';
 
                 let html = `<span style="font-weight: 600; color: var(--text-primary);">🔍 ${dm.total_discovered} pages discovered</span>`;
-                html += `<span style="color: var(--text-tertiary);">(${dm.static_count} static + ${dm.interactive_count} from menus)</span>`;
+
+                // Source breakdown
+                const parts = [];
+                if (dm.static_count) parts.push(`${dm.static_count} static`);
+                if (dm.interactive_count) parts.push(`${dm.interactive_count} from menus`);
+                if (dm.cloudflare_amplified && dm.cloudflare_urls) {
+                    parts.push(`<span style="color: #f59e0b;">☁️ ${dm.cloudflare_urls} via Cloudflare</span>`);
+                }
+                if (parts.length) {
+                    html += `<span style="color: var(--text-tertiary);">(${parts.join(' + ')})</span>`;
+                }
 
                 if (dm.interaction_log && dm.interaction_log.length > 0) {
                     const clickedItems = dm.interaction_log
@@ -3644,6 +3654,70 @@
 
                 discoveryBar.innerHTML = html;
                 grid.appendChild(discoveryBar);
+            }
+
+            // URL Inventory card (surfaces the full Cloudflare/interactive URL pool)
+            if (evidence.url_inventory && evidence.url_inventory.total > 0) {
+                const inv = evidence.url_inventory;
+                const invCard = document.createElement('div');
+                invCard.className = 'metric-card';
+                invCard.style.gridColumn = '1 / -1';
+                invCard.style.borderLeft = '4px solid #f59e0b';
+
+                let invHtml = `
+                    <div class="metric-title" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>🗂 URL Inventory — ${inv.total} pages across ${inv.sections_count} sections</span>
+                        <span style="font-size: var(--text-xs); color: var(--text-tertiary);">${inv.coverage_note || ''}</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-3);">`;
+
+                // Section pills (top 10)
+                const sections = inv.section_summary || [];
+                for (const s of sections) {
+                    const pct = inv.total > 0 ? Math.round(s.count / inv.total * 100) : 0;
+                    invHtml += `<span style="background: rgba(245,158,11,0.12); color: #b45309; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 500;">${s.section} <span style="opacity:0.7;">(${s.count} · ${pct}%)</span></span>`;
+                }
+
+                invHtml += `</div>`;
+
+                // Source breakdown
+                if (inv.by_source) {
+                    invHtml += `<div style="margin-top: var(--space-3); display: flex; gap: 12px; font-size: var(--text-xs); color: var(--text-secondary);">`;
+                    for (const [src, count] of Object.entries(inv.by_source)) {
+                        const icon = src === 'cloudflare' ? '☁️' : src === 'interactive' ? '🖱' : src === 'nav' ? '🧭' : '📄';
+                        invHtml += `<span>${icon} ${src}: ${count}</span>`;
+                    }
+                    invHtml += `</div>`;
+                }
+
+                // Site content profile (if available)
+                const scp = evidence.site_content_profile;
+                if (scp && scp.total_pages > 0) {
+                    invHtml += `<div style="margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border-secondary);">`;
+                    invHtml += `<div style="font-weight: 600; font-size: var(--text-sm); margin-bottom: var(--space-2);">📊 Content Profile — ${scp.total_pages} pages classified</div>`;
+
+                    // Stacked bar chart
+                    const typeColors = { product: '#ef4444', article: '#3b82f6', documentation: '#10b981', landing: '#8b5cf6', pricing: '#f59e0b', about: '#6366f1', content: '#64748b', other: '#94a3b8', form: '#ec4899', legal: '#78716c', minimal: '#d1d5db', careers: '#14b8a6', faq: '#a855f7', contact: '#f97316' };
+                    invHtml += `<div style="display: flex; height: 24px; border-radius: 6px; overflow: hidden; margin-bottom: var(--space-2);">`;
+                    for (const [ptype, pct_str] of Object.entries(scp.distribution_pct || {})) {
+                        const pct = parseInt(pct_str);
+                        if (pct < 2) continue;
+                        const color = typeColors[ptype] || '#94a3b8';
+                        invHtml += `<div style="width: ${pct}%; background: ${color}; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.6rem; font-weight: 600; min-width: 20px;" title="${ptype}: ${pct_str}">${pct >= 8 ? ptype : ''}</div>`;
+                    }
+                    invHtml += `</div>`;
+
+                    // Legend
+                    invHtml += `<div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: var(--text-xs);">`;
+                    for (const [ptype, pct_str] of Object.entries(scp.distribution_pct || {})) {
+                        const color = typeColors[ptype] || '#94a3b8';
+                        invHtml += `<span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: ${color}; display: inline-block;"></span>${ptype} ${pct_str}</span>`;
+                    }
+                    invHtml += `</div></div>`;
+                }
+
+                invCard.innerHTML = invHtml;
+                grid.appendChild(invCard);
             }
 
             // Add validated Site Architecture card (cross-page capability pills)
