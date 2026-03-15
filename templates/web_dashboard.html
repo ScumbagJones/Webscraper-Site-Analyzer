@@ -4099,7 +4099,7 @@
                     name: 'Layout & Structure',
                     metrics: [
                         { key: 'layout', icon: '📐', title: 'Layout System' },
-                        { key: 'accessibility_tree', icon: '🌐', title: 'Semantic Structure' },
+                        { key: 'accessibility_tree', icon: '🏗', title: 'Page Blueprint' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
                         { key: 'z_index_stack', icon: '📚', title: 'Page Layers' },
@@ -4122,7 +4122,7 @@
                     metrics: [
                         { key: 'performance', icon: '⚡', title: 'Performance' },
                         { key: 'accessibility', icon: '♿', title: 'Accessibility' },
-                        { key: 'contrast_a11y', icon: '🔆', title: 'Contrast Audit' },
+                        { key: 'contrast_a11y', icon: '👁', title: 'Readability' },
                         { key: 'seo', icon: '🔍', title: 'SEO' },
                         { key: 'security', icon: '🔒', title: 'Security' }
                     ]
@@ -4829,7 +4829,7 @@
                     icon: '📐',
                     metrics: [
                         { key: 'layout', icon: '📐', title: 'Layout System' },
-                        { key: 'accessibility_tree', icon: '🌐', title: 'Semantic Structure' },
+                        { key: 'accessibility_tree', icon: '🏗', title: 'Page Blueprint' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
                         { key: 'z_index_stack', icon: '📚', title: 'Page Layers' },
@@ -4857,7 +4857,7 @@
                         { key: 'css_efficiency', icon: '📊', title: 'CSS Efficiency' },
                         { key: 'css_specificity', icon: '⚖', title: 'CSS Specificity' },
                         { key: 'accessibility', icon: '♿', title: 'Accessibility' },
-                        { key: 'contrast_a11y', icon: '🔆', title: 'Contrast Audit' },
+                        { key: 'contrast_a11y', icon: '👁', title: 'Readability' },
                         { key: 'seo', icon: '🔍', title: 'SEO' },
                         { key: 'security', icon: '🔒', title: 'Security' }
                     ]
@@ -5282,13 +5282,13 @@
                 bodyHTML = createMotionTokensCard(icon, title, data, confidenceClass);
             } else if (title === 'Spatial Composition') {
                 bodyHTML = createSpatialCompositionCard(icon, title, data, confidenceClass);
-            } else if (title === 'Semantic Structure') {
+            } else if (title === 'Semantic Structure' || title === 'Page Blueprint') {
                 bodyHTML = createSemanticStructureCard(icon, title, data, confidenceClass);
             } else if (title === 'Brand Personality') {
                 bodyHTML = createBrandPersonalityCard(icon, title, data, confidenceClass);
             } else if (title === 'Runtime Animations') {
                 bodyHTML = createCdpAnimationsCard(icon, title, data, confidenceClass);
-            } else if (title === 'Contrast Audit') {
+            } else if (title === 'Contrast Audit' || title === 'Readability') {
                 bodyHTML = createContrastAuditCard(icon, title, data, confidenceClass);
             } else if (title === 'Scan Timing') {
                 bodyHTML = createScanTimingCard(icon, title, data, confidenceClass);
@@ -9090,103 +9090,121 @@
 
         // ── Semantic Structure Card (Accessibility Tree) ────────────────
         function createSemanticStructureCard(icon, title, data, confidenceClass) {
-            // Page outline
-            const outline = data.page_outline || '';
-            const outlineHTML = outline ? `
-                <div style="background: #0a0a0a; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
-                    <div style="font-weight: 600; margin-bottom: 0.75rem; color: #fff;">Page Skeleton</div>
-                    <pre style="color: #9ca3af; font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap; margin: 0; font-family: 'SF Mono', Menlo, monospace;">${outline}</pre>
-                </div>
-            ` : '';
+            // Translate landmark types to plain language
+            const landmarkNames = {
+                'header': { name: 'Header', icon: '▬', color: '#6c9eff', desc: 'Top banner area' },
+                'navigation': { name: 'Menu', icon: '☰', color: '#6cff9e', desc: 'Links to other pages' },
+                'main': { name: 'Main Content', icon: '▣', color: '#ffe06c', desc: 'Primary page content' },
+                'footer': { name: 'Footer', icon: '▬', color: '#cf6cff', desc: 'Bottom info area' },
+                'complementary': { name: 'Sidebar', icon: '▐', color: '#6cffe0', desc: 'Supporting content' },
+                'form': { name: 'Form', icon: '✎', color: '#ff6c6c', desc: 'User input area' },
+                'search': { name: 'Search', icon: '⌕', color: '#ff9f0a', desc: 'Search functionality' },
+                'banner': { name: 'Banner', icon: '▬', color: '#6c9eff', desc: 'Site-wide banner' },
+                'contentinfo': { name: 'Footer Info', icon: '▬', color: '#cf6cff', desc: 'Copyright & legal' },
+                'region': { name: 'Section', icon: '▢', color: '#8e8e93', desc: 'Named page region' }
+            };
 
-            // Landmarks
+            // Building blocks — visual stacked diagram
             const landmarks = data.landmarks || [];
-            const landmarkHTML = landmarks.length > 0 ? `
-                <div style="background: #0a0a0a; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
-                    <div style="font-weight: 600; margin-bottom: 0.75rem; color: #fff;">Landmarks</div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                        ${landmarks.map(l => {
-                            const colors = {
-                                'header': { bg: '#1a1a2e', border: '#6c9eff', text: '#6c9eff' },
-                                'navigation': { bg: '#1a2e1a', border: '#6cff9e', text: '#6cff9e' },
-                                'main': { bg: '#2e2e1a', border: '#ffe06c', text: '#ffe06c' },
-                                'footer': { bg: '#2e1a2e', border: '#cf6cff', text: '#cf6cff' },
-                                'complementary': { bg: '#1a2e2e', border: '#6cffe0', text: '#6cffe0' },
-                                'form': { bg: '#2e1a1a', border: '#ff6c6c', text: '#ff6c6c' }
-                            };
-                            const c = colors[l.type] || { bg: '#1a1a1a', border: '#666', text: '#999' };
-                            const label = l.label ? ` — ${l.label}` : '';
-                            return `<span style="display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: ${c.bg}; border: 1px solid ${c.border}; color: ${c.text};">${l.type}${label}</span>`;
-                        }).join('')}
+            const blocksHTML = landmarks.length > 0 ? (() => {
+                const blocks = landmarks.map(l => {
+                    const info = landmarkNames[l.type] || { name: l.type, icon: '▢', color: '#666', desc: '' };
+                    const label = l.label ? ` — ${l.label}` : '';
+                    return { ...info, label, type: l.type };
+                });
+                return `
+                <div style="background:#0a0a0a; border-radius:8px; padding:1rem; margin-bottom:1rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px;">Building Blocks</div>
+                    <div style="display:flex; flex-direction:column; gap:3px;">
+                        ${blocks.map(b => `
+                        <div style="display:flex; align-items:center; gap:8px; padding:7px 10px; background:${b.color}0a; border-left:3px solid ${b.color}; border-radius:0 6px 6px 0;">
+                            <span style="font-size:0.9rem; width:18px; text-align:center; opacity:0.7;">${b.icon}</span>
+                            <span style="font-size:0.82rem; font-weight:600; color:${b.color};">${b.name}</span>
+                            <span style="font-size:0.7rem; color:#666;">${b.desc}${b.label}</span>
+                        </div>`).join('')}
                     </div>
-                </div>
-            ` : '';
+                </div>`;
+            })() : '';
 
-            // Heading hierarchy
+            // Content outline — heading hierarchy as a visual table of contents
             const headings = data.heading_hierarchy || [];
-            const headingHTML = headings.length > 0 ? `
-                <div style="background: #0a0a0a; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
-                    <div style="font-weight: 600; margin-bottom: 0.75rem; color: #fff;">Heading Hierarchy</div>
-                    <div style="font-family: 'SF Mono', Menlo, monospace; font-size: 0.8rem; line-height: 1.7; color: #9ca3af;">
-                        ${headings.slice(0, 12).map(h => {
-                            const indent = (h.level - 1) * 16;
-                            const sizes = { 1: '1rem', 2: '0.95rem', 3: '0.9rem', 4: '0.85rem', 5: '0.8rem', 6: '0.75rem' };
-                            const weights = { 1: '700', 2: '600', 3: '500' };
-                            const colors = { 1: '#fff', 2: '#d1d5db', 3: '#9ca3af', 4: '#6b7280', 5: '#6b7280', 6: '#6b7280' };
-                            return `<div style="padding-left: ${indent}px; font-size: ${sizes[h.level] || '0.8rem'}; font-weight: ${weights[h.level] || '400'}; color: ${colors[h.level] || '#6b7280'};">
-                                <span style="color: #4ade80; opacity: 0.5;">h${h.level}</span> ${h.text || ''}
+            const outlineHTML = headings.length > 0 ? `
+                <div style="background:#0a0a0a; border-radius:8px; padding:1rem; margin-bottom:1rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px;">Table of Contents</div>
+                    <div style="line-height:1.7;">
+                        ${headings.slice(0, 14).map(h => {
+                            const indent = (h.level - 1) * 18;
+                            const isMain = h.level === 1;
+                            const weight = h.level <= 2 ? '600' : '400';
+                            const size = isMain ? '0.9rem' : h.level === 2 ? '0.82rem' : '0.75rem';
+                            const color = isMain ? '#fff' : h.level === 2 ? '#ccc' : '#888';
+                            const bullet = isMain ? '●' : h.level === 2 ? '○' : '·';
+                            return `<div style="padding-left:${indent}px; font-size:${size}; font-weight:${weight}; color:${color}; display:flex; align-items:baseline; gap:6px;">
+                                <span style="color:#555; font-size:0.6rem;">${bullet}</span>
+                                <span>${h.text || ''}</span>
                             </div>`;
                         }).join('')}
-                        ${headings.length > 12 ? `<div style="color: #555; margin-top: 0.5rem;">+ ${headings.length - 12} more headings</div>` : ''}
+                        ${headings.length > 14 ? `<div style="color:#555; font-size:0.72rem; margin-top:0.5rem; padding-left:8px;">+ ${headings.length - 14} more sections</div>` : ''}
                     </div>
                 </div>
             ` : '';
 
-            // Navigation items
+            // Menu items
             const navStructure = data.navigation_structure || {};
             const primaryNav = navStructure.primary_nav || {};
             const navItems = primaryNav.items || navStructure.items || [];
             const ctaLinks = navStructure.cta_links || [];
-            const navHTML = navItems.length > 0 ? `
-                <div style="background: #0a0a0a; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
-                    <div style="font-weight: 600; margin-bottom: 0.75rem; color: #fff;">Navigation (${navStructure.total_nav_items || navItems.length} items)</div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+            const menuHTML = navItems.length > 0 ? `
+                <div style="background:#0a0a0a; border-radius:8px; padding:1rem; margin-bottom:1rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px;">Menu Items (${navStructure.total_nav_items || navItems.length})</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:5px;">
                         ${navItems.slice(0, 20).map(item => {
                             const isCTA = ctaLinks.some(c => c.text === item.text);
-                            if (isCTA) {
-                                return `<span style="display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; background: #1a2e1a; border: 1px solid #4ade80; color: #4ade80;">★ ${item.text}</span>`;
-                            }
-                            return `<span style="display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; background: #111; border: 1px solid #333; color: #9ca3af;">${item.text}</span>`;
+                            return isCTA
+                                ? `<span style="padding:4px 10px; border-radius:14px; font-size:0.78rem; background:rgba(52,199,89,0.12); border:1px solid rgba(52,199,89,0.3); color:#34c759; font-weight:600;">${item.text}</span>`
+                                : `<span style="padding:4px 10px; border-radius:14px; font-size:0.78rem; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); color:#aaa;">${item.text}</span>`;
                         }).join('')}
                     </div>
-                    ${ctaLinks.length > 0 ? `<div style="margin-top: 0.5rem; font-size: 0.75rem; color: #4ade80;">★ = CTA link</div>` : ''}
+                    ${ctaLinks.length > 0 ? `<div style="margin-top:6px; font-size:0.68rem; color:#34c759;">Green = call-to-action buttons</div>` : ''}
                 </div>
             ` : '';
 
-            // Interactive elements summary
+            // Clickable things — interactive elements in plain language
             const interactive = data.interactive_elements || {};
-            const interactiveHTML = (interactive.buttons || interactive.links || interactive.inputs) ? `
-                <div style="background: #0a0a0a; padding: 1rem; border-radius: 6px;">
-                    <div style="font-weight: 600; margin-bottom: 0.75rem; color: #fff;">Interactive Elements</div>
-                    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-                        ${interactive.buttons ? `<div style="text-align: center;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #6c9eff;">${interactive.buttons}</div>
-                            <div style="font-size: 0.75rem; color: #666;">Buttons</div>
+            const totalInteractive = (interactive.buttons||0) + (interactive.links||0) + (interactive.inputs||0) + (interactive.forms||0);
+            const clickableHTML = totalInteractive > 0 ? `
+                <div style="background:#0a0a0a; border-radius:8px; padding:1rem;">
+                    <div style="font-size:0.65rem; color:#555; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:10px;">Things You Can Interact With</div>
+                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                        ${interactive.buttons ? `<div style="flex:1; min-width:80px; text-align:center; padding:10px 8px; background:rgba(108,158,255,0.06); border:1px solid rgba(108,158,255,0.15); border-radius:8px;">
+                            <div style="font-size:1.4rem; font-weight:800; color:#6c9eff;">${interactive.buttons}</div>
+                            <div style="font-size:0.7rem; color:#6c9eff; opacity:0.7;">Buttons</div>
                         </div>` : ''}
-                        ${interactive.links ? `<div style="text-align: center;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #4ade80;">${interactive.links}</div>
-                            <div style="font-size: 0.75rem; color: #666;">Links</div>
+                        ${interactive.links ? `<div style="flex:1; min-width:80px; text-align:center; padding:10px 8px; background:rgba(74,222,128,0.06); border:1px solid rgba(74,222,128,0.15); border-radius:8px;">
+                            <div style="font-size:1.4rem; font-weight:800; color:#4ade80;">${interactive.links}</div>
+                            <div style="font-size:0.7rem; color:#4ade80; opacity:0.7;">Links</div>
                         </div>` : ''}
-                        ${interactive.inputs ? `<div style="text-align: center;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #ffe06c;">${interactive.inputs}</div>
-                            <div style="font-size: 0.75rem; color: #666;">Inputs</div>
+                        ${interactive.inputs ? `<div style="flex:1; min-width:80px; text-align:center; padding:10px 8px; background:rgba(255,224,108,0.06); border:1px solid rgba(255,224,108,0.15); border-radius:8px;">
+                            <div style="font-size:1.4rem; font-weight:800; color:#ffe06c;">${interactive.inputs}</div>
+                            <div style="font-size:0.7rem; color:#ffe06c; opacity:0.7;">Text Fields</div>
                         </div>` : ''}
-                        ${interactive.forms ? `<div style="text-align: center;">
-                            <div style="font-size: 1.5rem; font-weight: 700; color: #cf6cff;">${interactive.forms}</div>
-                            <div style="font-size: 0.75rem; color: #666;">Forms</div>
+                        ${interactive.forms ? `<div style="flex:1; min-width:80px; text-align:center; padding:10px 8px; background:rgba(207,108,255,0.06); border:1px solid rgba(207,108,255,0.15); border-radius:8px;">
+                            <div style="font-size:1.4rem; font-weight:800; color:#cf6cff;">${interactive.forms}</div>
+                            <div style="font-size:0.7rem; color:#cf6cff; opacity:0.7;">Forms</div>
                         </div>` : ''}
                     </div>
                 </div>
+            ` : '';
+
+            // Page outline (collapsible — for power users)
+            const rawOutline = data.page_outline || '';
+            const skeletonHTML = rawOutline ? `
+                <details style="margin-top:0.75rem;">
+                    <summary style="font-size:0.65rem; color:#444; cursor:pointer; text-transform:uppercase; letter-spacing:0.04em; padding:4px 0;">Technical: Document Outline</summary>
+                    <div style="background:#0a0a0a; border-radius:6px; padding:0.75rem; margin-top:6px;">
+                        <pre style="color:#666; font-size:0.72rem; line-height:1.5; white-space:pre-wrap; margin:0; font-family:'SF Mono',Menlo,monospace;">${rawOutline}</pre>
+                    </div>
+                </details>
             ` : '';
 
             return `
@@ -9198,16 +9216,13 @@
                     </div>
                     ${data.confidence ? `<div class="confidence-badge confidence-${confidenceClass}">${data.confidence}%</div>` : ''}
                 </div>
-                <div class="metric-value">${data.pattern || 'Semantic structure analyzed'}</div>
-                <div style="font-size: 0.8rem; color: #666; margin: 0.5rem 0 1rem; line-height: 1.5;">
-                    The browser's own understanding of page structure — landmarks, headings, navigation, and interactive elements as declared by ARIA roles and semantic HTML.
-                </div>
+                <div class="metric-value" style="color:#888; font-size:0.8rem;">How this page is organized — its sections, menu, and interactive elements</div>
                 <div class="metric-detail">
+                    ${blocksHTML}
                     ${outlineHTML}
-                    ${landmarkHTML}
-                    ${headingHTML}
-                    ${navHTML}
-                    ${interactiveHTML}
+                    ${menuHTML}
+                    ${clickableHTML}
+                    ${skeletonHTML}
                 </div>
             `;
         }
@@ -9365,63 +9380,95 @@
             const totalV      = d.total_violations || 0;
             const totalP      = d.total_passes || 0;
             const score       = data.score ?? null;
-            const wcag        = d.wcag_level || 'AA';
 
-            // Score ring color
-            const ringColor = score === null ? '#555'
-                : score >= 90 ? '#34c759'
-                : score >= 70 ? '#ff9f0a'
-                : '#ff6b6b';
+            // Translate score to human verdict
+            const verdict = score === null ? { label: 'Unknown', color: '#555', bg: 'rgba(85,85,85,0.08)', explain: 'Could not be measured' }
+                : score >= 95 ? { label: 'Excellent', color: '#34c759', bg: 'rgba(52,199,89,0.08)', explain: 'All text is easy to read against its background' }
+                : score >= 80 ? { label: 'Good', color: '#30d158', bg: 'rgba(48,209,88,0.08)', explain: 'Most text is clearly readable, minor issues' }
+                : score >= 60 ? { label: 'Needs Work', color: '#ff9f0a', bg: 'rgba(255,159,10,0.08)', explain: 'Some text may be hard to read, especially for people with low vision' }
+                : { label: 'Poor', color: '#ff453a', bg: 'rgba(255,69,58,0.08)', explain: 'Many elements have text that blends into the background' };
 
-            const scoreHTML = score !== null ? `
-                <div style="display:flex; align-items:center; gap:1rem; margin:0.75rem 0;">
-                    <div style="position:relative; width:56px; height:56px; flex-shrink:0;">
-                        <svg width="56" height="56" viewBox="0 0 56 56">
-                            <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="5"/>
-                            <circle cx="28" cy="28" r="22" fill="none" stroke="${ringColor}" stroke-width="5"
-                                stroke-dasharray="${(score/100)*138.2} 138.2"
-                                stroke-linecap="round" transform="rotate(-90 28 28)"/>
+            // Hero: big verdict
+            const heroHTML = `
+                <div style="display:flex; align-items:center; gap:1.25rem; margin:0.5rem 0 1rem; padding:1rem; background:${verdict.bg}; border-radius:10px; border:1px solid ${verdict.color}18;">
+                    ${score !== null ? `
+                    <div style="position:relative; width:64px; height:64px; flex-shrink:0;">
+                        <svg width="64" height="64" viewBox="0 0 64 64">
+                            <circle cx="32" cy="32" r="26" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/>
+                            <circle cx="32" cy="32" r="26" fill="none" stroke="${verdict.color}" stroke-width="5"
+                                stroke-dasharray="${(score/100)*163.4} 163.4"
+                                stroke-linecap="round" transform="rotate(-90 32 32)"/>
                         </svg>
-                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:700;color:${ringColor};">${score}</div>
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:800;color:${verdict.color};">${score}</div>
+                    </div>` : ''}
+                    <div style="flex:1;">
+                        <div style="font-size:1.2rem; font-weight:700; color:${verdict.color}; margin-bottom:2px;">${verdict.label}</div>
+                        <div style="font-size:0.78rem; color:#999; line-height:1.4;">${verdict.explain}</div>
+                        <div style="font-size:0.7rem; color:#555; margin-top:4px;">${totalP + totalV} elements checked · ${totalP} readable · ${totalV} hard to read</div>
                     </div>
-                    <div>
-                        <div style="font-size:0.72rem; color:#666; text-transform:uppercase; letter-spacing:0.04em;">WCAG ${wcag} Score</div>
-                        <div style="font-size:0.85rem; color:#aaa; margin-top:2px;">${totalP} pass · ${totalV} fail</div>
-                    </div>
-                </div>` : '';
+                </div>`;
 
-            const sevHTML = totalV > 0 ? `
-                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:0.4rem; margin-bottom:0.75rem;">
-                    ${[['Critical', severity.critical||0, '#ff453a'], ['Serious', severity.serious||0, '#ff9f0a'],
-                       ['Moderate', severity.moderate||0, '#ffd60a'], ['Minor', severity.minor||0, '#8e8e93']].map(([lbl, n, col]) => `
-                    <div style="text-align:center; background:rgba(255,255,255,0.03); border:1px solid ${col}22; border-radius:6px; padding:6px 2px;">
-                        <div style="font-size:1rem; font-weight:700; color:${n>0?col:'#444'};">${n}</div>
-                        <div style="font-size:0.6rem; color:#666; text-transform:uppercase;">${lbl}</div>
-                    </div>`).join('')}
-                </div>` : '';
-
-            // Top 4 violations
-            const topViolations = violations.slice(0, 4);
-            const violationsHTML = topViolations.length ? `
-                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:0.6rem;">
-                    <div style="font-size:0.65rem; color:#666; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px;">Top Violations</div>
-                    ${topViolations.map(v => `
-                    <div style="display:flex; gap:8px; align-items:flex-start; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
-                        ${v.fg_color && v.bg_color ? `
-                        <div style="display:flex; flex-direction:column; gap:2px; flex-shrink:0;">
-                            <div style="width:14px;height:14px;background:${v.fg_color};border-radius:3px;border:1px solid rgba(255,255,255,0.15);" title="FG: ${v.fg_color}"></div>
-                            <div style="width:14px;height:14px;background:${v.bg_color};border-radius:3px;border:1px solid rgba(255,255,255,0.15);" title="BG: ${v.bg_color}"></div>
-                        </div>` : ''}
-                        <div style="flex:1; min-width:0;">
-                            <div style="display:flex; gap:6px; align-items:center;">
-                                <span style="font-size:0.7rem; color:${v.impact==='critical'?'#ff453a':v.impact==='serious'?'#ff9f0a':'#ffd60a'}; font-weight:600; text-transform:uppercase;">${v.impact}</span>
-                                ${v.contrast_ratio ? `<span style="font-size:0.7rem; color:#555; font-family:monospace;">${v.contrast_ratio}:1</span>` : ''}
-                            </div>
-                            <div style="font-size:0.72rem; color:#888; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${(v.selector||'').substring(0,60)}</div>
+            // Severity → plain language
+            const issueBreakdown = totalV > 0 ? (() => {
+                const levels = [
+                    { n: severity.critical||0, label: 'Invisible', desc: 'Text nearly invisible against background', color: '#ff453a', icon: '🚫' },
+                    { n: severity.serious||0, label: 'Hard to read', desc: 'Requires effort to distinguish', color: '#ff9f0a', icon: '⚠️' },
+                    { n: severity.moderate||0, label: 'Slightly faint', desc: 'Readable but not comfortable', color: '#ffd60a', icon: '💡' },
+                    { n: severity.minor||0, label: 'Subtle', desc: 'Minor contrast shortfall', color: '#8e8e93', icon: '○' }
+                ].filter(l => l.n > 0);
+                return `<div style="margin-bottom:1rem;">${levels.map(l => `
+                    <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                        <span style="font-size:0.9rem; width:20px; text-align:center;">${l.icon}</span>
+                        <span style="font-size:0.95rem; font-weight:700; color:${l.color}; min-width:22px;">${l.n}</span>
+                        <div style="flex:1;">
+                            <div style="font-size:0.8rem; font-weight:600; color:${l.color};">${l.label}</div>
+                            <div style="font-size:0.68rem; color:#666;">${l.desc}</div>
                         </div>
-                    </div>`).join('')}
-                    ${violations.length > 4 ? `<div style="font-size:0.72rem; color:#555; margin-top:4px;">+${violations.length-4} more violations</div>` : ''}
-                </div>` : `<div style="color:#34c759; font-size:0.85rem; margin-top:0.5rem;">✓ No contrast violations detected</div>`;
+                    </div>`).join('')}</div>`;
+            })() : '';
+
+            // Live preview: show actual text on actual background (color.review inspired)
+            const topViolations = violations.slice(0, 5);
+            const previewsHTML = topViolations.length ? `
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:0.75rem;">
+                    <div style="font-size:0.65rem; color:#666; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:8px;">Can you read these?</div>
+                    ${topViolations.map(v => {
+                        const fg = v.fg_color || '#888';
+                        const bg = v.bg_color || '#111';
+                        const ratio = v.contrast_ratio ? parseFloat(v.contrast_ratio).toFixed(1) : '?';
+                        const pass = parseFloat(ratio) >= 4.5;
+                        // Extract a meaningful label from the selector
+                        const sel = v.selector || '';
+                        const elName = sel.match(/([a-z]+[0-9]*)/i);
+                        const shortSel = elName ? elName[1] : 'text';
+                        return `
+                        <div style="display:flex; align-items:stretch; gap:8px; margin-bottom:6px; border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.06);">
+                            <div style="flex:1; background:${bg}; color:${fg}; padding:10px 14px; font-size:0.85rem; font-weight:500; display:flex; align-items:center;">
+                                Sample text on this background
+                            </div>
+                            <div style="width:70px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); padding:6px;">
+                                <div style="font-size:1rem; font-weight:800; color:${pass ? '#34c759' : '#ff453a'};">${ratio}</div>
+                                <div style="font-size:0.55rem; color:#666; margin-top:1px;">${pass ? 'PASS' : 'FAIL'}</div>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                    ${violations.length > 5 ? `<div style="font-size:0.68rem; color:#555; margin-top:6px;">+ ${violations.length-5} more problem areas</div>` : ''}
+                </div>` : (totalP > 0 ? `<div style="text-align:center; padding:1.5rem 0; color:#34c759;">
+                    <div style="font-size:2rem; margin-bottom:4px;">✓</div>
+                    <div style="font-size:0.9rem; font-weight:600;">Everything is readable</div>
+                    <div style="font-size:0.72rem; color:#888; margin-top:2px;">All text has enough contrast against its background</div>
+                </div>` : '');
+
+            // Threshold bar (inspired by color.review)
+            const thresholdHTML = score !== null ? `
+                <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid rgba(255,255,255,0.04);">
+                    <div style="display:flex; justify-content:space-between; font-size:0.6rem; color:#555; margin-bottom:4px;">
+                        <span>Poor</span><span>Needs work</span><span>Good</span><span>Excellent</span>
+                    </div>
+                    <div style="position:relative; height:6px; background:linear-gradient(to right, #ff453a, #ff9f0a 40%, #ffd60a 60%, #34c759 85%, #34c759); border-radius:3px;">
+                        <div style="position:absolute; top:-3px; left:${Math.min(score, 100)}%; transform:translateX(-50%); width:12px; height:12px; background:#fff; border-radius:50%; border:2px solid ${verdict.color}; box-shadow:0 0 6px ${verdict.color}44;"></div>
+                    </div>
+                </div>` : '';
 
             return `
                 <div class="metric-header">
@@ -9430,9 +9477,9 @@
                     </div>
                     <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
-                <div class="metric-value">${data.pattern || ''}</div>
+                <div class="metric-value" style="color:#888; font-size:0.8rem;">${totalV === 0 ? 'All text is readable' : totalV + ' elements where text is hard to read'}</div>
                 <div class="metric-body">
-                    ${scoreHTML}${sevHTML}${violationsHTML}
+                    ${heroHTML}${issueBreakdown}${previewsHTML}${thresholdHTML}
                 </div>
             `;
         }

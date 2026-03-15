@@ -833,6 +833,11 @@ class DeepEvidenceEngine:
             evidence['animations'] = await safe_extract('Animations', self._extract_animations, page)
         if _should_extract('accessibility'):
             evidence['accessibility'] = await safe_extract('Accessibility', self._extract_accessibility, page)
+        if _should_extract('accessibility_tree'):
+            print("   🏗 Capturing page blueprint (accessibility tree)...")
+            from extractors.accessibility_tree import AccessibilityTreeExtractor
+            _a11y_ctx = ExtractionContext(page=page, url=url, html_content=html_content, network_requests=self.network_requests, network_responses=self.network_responses, evidence=evidence)
+            evidence['accessibility_tree'] = await safe_extract('Accessibility Tree', AccessibilityTreeExtractor().extract, _a11y_ctx)
         if _should_extract('performance'):
             print("   ⚡ Measuring performance...")
             _perf_ctx = ExtractionContext(page=page, url=url, html_content=html_content, network_requests=self.network_requests, network_responses=self.network_responses, evidence=evidence)
