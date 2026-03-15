@@ -97,24 +97,42 @@ class CloudflareCrawler:
         payload = {
             'url': url,
             'limit': min(limit, 100000),
-            'maxDiscoveryDepth': depth,
             'render': render,
             'formats': formats or ['markdown'],
         }
 
+        # Optional params — only include if the API version supports them
+        optional_params = {}
+        if depth != 2:  # only send non-default depth
+            optional_params['maxDepth'] = depth
         if include_patterns:
-            payload['includePatterns'] = include_patterns
+            optional_params['includePatterns'] = include_patterns
         if exclude_patterns:
-            payload['excludePatterns'] = exclude_patterns
+            optional_params['excludePatterns'] = exclude_patterns
 
-        resp = requests.post(self._crawl_url, json=payload, headers=self._headers, timeout=30)
+        # Try with optional params first, fall back to minimal on 400
+        full_payload = {**payload, **optional_params}
+
+        resp = requests.post(self._crawl_url, json=full_payload, headers=self._headers, timeout=30)
+        if resp.status_code == 400 and optional_params:
+            # API rejected optional params — retry with minimal payload
+            logger.info("Cloudflare rejected optional params, retrying with minimal payload")
+            resp = requests.post(self._crawl_url, json=payload, headers=self._headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
 
-        crawl_id = data.get('result', {}).get('crawlId') or data.get('crawlId')
-        if not crawl_id:
-            # Try alternate response shape
-            crawl_id = data.get('id') or data.get('result', {}).get('id')
+        result = data.get('result')
+
+        # API returns crawl_id in various shapes depending on version:
+        #   {"result": "uuid-string"}              ← current (2026)
+        #   {"result": {"crawlId": "uuid"}}         ← older shape
+        #   {"crawlId": "uuid"}                     ← flat shape
+        if isinstance(result, str):
+            crawl_id = result
+        elif isinstance(result, dict):
+            crawl_id = result.get('crawlId') or result.get('id')
+        else:
+            crawl_id = data.get('crawlId') or data.get('id')
 
         if not crawl_id:
             raise ValueError(f"Cloudflare did not return a crawl ID. Response: {data}")
@@ -135,10 +153,31 @@ class CloudflareCrawler:
         data = resp.json()
 
         result = data.get('result', data)
+
+        # API returns completed records in 'records' key (not 'data' or 'pages')
+        # Each record has: url, status, metadata, html/markdown
+        records = result.get('records', result.get('data', result.get('pages', [])))
+
+        # Normalize records to the shape our code expects: {url, content, ...}
+        pages = []
+        for rec in records:
+            if rec.get('status') == 'skipped':
+                continue
+            page = {
+                'url': rec.get('url', ''),
+                'content': rec.get('markdown') or rec.get('html', ''),
+                'title': rec.get('metadata', {}).get('title', ''),
+                'sourceURL': rec.get('url', ''),
+                'statusCode': rec.get('metadata', {}).get('status'),
+            }
+            pages.append(page)
+
         return {
             'status': result.get('status', 'unknown'),
-            'pages': result.get('data', result.get('pages', [])),
+            'pages': pages,
             'total': result.get('total', 0),
+            'finished': result.get('finished', 0),
+            'skipped': result.get('skipped', 0),
             'crawl_id': crawl_id,
         }
 
