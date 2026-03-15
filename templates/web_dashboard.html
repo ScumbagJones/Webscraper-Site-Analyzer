@@ -4173,6 +4173,7 @@
                     name: 'Layout & Structure',
                     metrics: [
                         { key: 'layout', icon: '📐', title: 'Layout System' },
+                        { key: 'content_layout', icon: '📰', title: 'Content Layout' },
                         { key: 'accessibility_tree', icon: '🏗', title: 'Page Blueprint' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
@@ -4256,7 +4257,7 @@
                     // better than the generic inline template below.
                     const _specializedKeys = new Set([
                         'contrast_a11y', 'accessibility_tree', 'api_patterns',
-                        'motion_tokens', 'seo',
+                        'motion_tokens', 'seo', 'content_layout',
                         'accessibility', 'interactive_elements', 'interaction_states',
                         'cdp_animations', 'shadow_system', 'z_index_stack',
                         'site_topology'
@@ -4927,6 +4928,7 @@
                     icon: '📐',
                     metrics: [
                         { key: 'layout', icon: '📐', title: 'Layout System' },
+                        { key: 'content_layout', icon: '📰', title: 'Content Layout' },
                         { key: 'accessibility_tree', icon: '🏗', title: 'Page Blueprint' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
@@ -5398,6 +5400,8 @@
                 bodyHTML = createInformationArchitectureCard(icon, title, data, confidenceClass);
             } else if (title === 'API Map' || title === 'API Patterns') {
                 bodyHTML = createAPIMapCard(icon, title, data, confidenceClass);
+            } else if (title === 'Content Layout' || title === 'Reading Experience') {
+                bodyHTML = createContentLayoutCard(icon, title, data, confidenceClass);
             } else {
                 bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
             }
@@ -7730,6 +7734,183 @@
 
                     <!-- Recommendations -->
                     ${recsHTML}
+                </div>
+            `;
+        }
+
+        // ── Content Layout Card ──────────────────────────────────────
+        // Shows HOW content is displayed: card grid dimensions, reading width,
+        // article card styling, list vs grid vs masonry
+        function createContentLayoutCard(icon, title, data, confidenceClass) {
+            const cl = data.card_layout || {};
+            const rw = data.reading_width || {};
+            const rv = data.reading_view;
+            const sl = data.section_layout;
+
+            // Reading width verdict colors
+            const rwColors = { optimal: '#4ade80', 'too narrow': '#fbbf24', 'too wide': '#f87171' };
+            const rwColor = rwColors[rw.verdict] || '#888';
+
+            // Card layout type descriptions
+            const layoutDescs = {
+                grid: 'Cards arranged in a multi-column grid',
+                list: 'Items stacked vertically in a single column',
+                'two-column': 'Content displayed in two columns',
+                masonry: 'Varied-height cards in a Pinterest-style layout',
+                none: 'No repeating content cards detected'
+            };
+
+            // ── Reading Width Section ──
+            let readingHTML = `
+                <div style="margin-bottom: 1rem;">
+                    <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem;">Reading Width</div>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div style="font-size: 2rem; font-weight: 700; color: ${rwColor}; line-height: 1;">${rw.chars_per_line || '?'}</div>
+                        <div>
+                            <div style="font-size: 0.82rem; color: #ccc;">characters per line</div>
+                            <div style="font-size: 0.72rem; color: ${rwColor}; margin-top: 2px;">${rw.verdict === 'optimal' ? '✓ Optimal reading width (45-75 chars)' : rw.verdict === 'too wide' ? '⚠ Too wide — harder to track lines' : rw.verdict === 'too narrow' ? '⚠ Too narrow — choppy reading' : ''}</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.68rem; color: #555; margin-top: 4px;">Container: ${rw.container_max_width || '?'}px max-width · ${rw.font_size || 16}px font</div>
+                </div>
+            `;
+
+            // ── Card Layout Section ──
+            let cardHTML = '';
+            if (cl.type && cl.type !== 'none') {
+                const anatomy = cl.card_anatomy || {};
+                const styling = cl.card_styling || {};
+
+                // Visual grid mockup
+                const cols = Math.min(cl.cards_per_row || 1, 6);
+                const mockCells = Array(Math.min(cols * 2, 12)).fill(0).map((_, i) => {
+                    const isImage = anatomy.has_image;
+                    return `<div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: ${styling.border_radius || '4px'}; padding: 6px; font-size: 0.55rem; color: #555; min-height: ${isImage ? '50px' : '30px'}; display: flex; flex-direction: column; gap: 2px;">
+                        ${isImage ? '<div style="background: rgba(255,255,255,0.06); border-radius: 2px; height: 20px;"></div>' : ''}
+                        <div style="background: rgba(255,255,255,0.08); height: 6px; width: 70%; border-radius: 1px;"></div>
+                        <div style="background: rgba(255,255,255,0.04); height: 4px; width: 90%; border-radius: 1px;"></div>
+                    </div>`;
+                }).join('');
+
+                // Anatomy pills
+                const anatomyPills = Object.entries(anatomy)
+                    .filter(([, v]) => v)
+                    .map(([k]) => k.replace('has_', ''))
+                    .map(k => `<span style="display: inline-block; background: rgba(10,132,255,0.1); color: #0a84ff; border-radius: 10px; padding: 2px 8px; font-size: 0.62rem;">${k}</span>`)
+                    .join(' ');
+
+                cardHTML = `
+                    <div style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 1rem; margin-top: 0.5rem;">
+                        <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem;">Content Cards</div>
+
+                        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #0a84ff; line-height: 1;">${cl.cards_found}</div>
+                            <div>
+                                <div style="font-size: 0.82rem; color: #ccc;">${cl.type} layout · ${cl.cards_per_row}/row</div>
+                                <div style="font-size: 0.68rem; color: #666;">${layoutDescs[cl.type] || ''}</div>
+                            </div>
+                        </div>
+
+                        <!-- Visual grid mockup -->
+                        <div style="display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: ${cl.horizontal_gap || 8}px; margin-bottom: 0.75rem; max-width: 280px;">
+                            ${mockCells}
+                        </div>
+
+                        <!-- Card dimensions -->
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.72rem; margin-bottom: 0.5rem;">
+                            <span style="color: #aaa;">Size: <strong style="color: #ccc;">${cl.avg_width}×${cl.avg_height}px</strong></span>
+                            <span style="color: #aaa;">Gap: <strong style="color: #ccc;">${cl.horizontal_gap}px H · ${cl.vertical_gap}px V</strong></span>
+                            <span style="color: #aaa;">Aspect: <strong style="color: #ccc;">${cl.avg_aspect_ratio}</strong></span>
+                            ${cl.image_ratio > 0 ? `<span style="color: #aaa;">Images: <strong style="color: #ccc;">${cl.image_ratio}%</strong></span>` : ''}
+                        </div>
+
+                        <!-- Card anatomy -->
+                        <div style="margin-top: 0.25rem;">
+                            <div style="font-size: 0.62rem; color: #666; margin-bottom: 3px;">Each card contains:</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 4px;">${anatomyPills}</div>
+                        </div>
+
+                        <!-- Card styling -->
+                        ${styling.has_shadow || styling.has_border ? `
+                            <div style="font-size: 0.68rem; color: #555; margin-top: 0.5rem;">
+                                Style: ${styling.border_radius !== '0px' ? `radius ${styling.border_radius}` : 'sharp corners'}
+                                ${styling.has_shadow ? ' · shadow' : ''}
+                                ${styling.has_border ? ' · border' : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // ── Reading View Section (single articles) ──
+            let readingViewHTML = '';
+            if (rv) {
+                const comfortColor = rv.reading_comfort === 'optimal' ? '#4ade80' : '#fbbf24';
+                readingViewHTML = `
+                    <div style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 1rem; margin-top: 0.5rem;">
+                        <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem;">Reading Experience</div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+                            <div style="text-align: center; padding: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #ccc;">${rv.font_size}px</div>
+                                <div style="font-size: 0.62rem; color: #666;">Font Size</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #ccc;">${rv.line_height_ratio}</div>
+                                <div style="font-size: 0.62rem; color: #666;">Line Height</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: 600; color: ${comfortColor};">${rv.content_width}px</div>
+                                <div style="font-size: 0.62rem; color: #666;">Content Width</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; margin-top: 0.5rem; font-size: 0.68rem; color: #888;">
+                            ${rv.paragraph_count ? `<span>${rv.paragraph_count} paragraphs</span>` : ''}
+                            ${rv.inline_images ? `<span>· ${rv.inline_images} images</span>` : ''}
+                            ${rv.pull_quotes ? `<span>· ${rv.pull_quotes} quotes</span>` : ''}
+                            ${rv.code_blocks ? `<span>· ${rv.code_blocks} code blocks</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // ── Section Layout (landing pages) ──
+            let sectionHTML = '';
+            if (sl && sl.length > 0) {
+                const sectionBars = sl.map((s, i) => {
+                    const hPct = Math.min(100, Math.round(s.height / 10));
+                    const typeColor = s.type === 'hero' ? '#8b5cf6' : s.type === 'content' ? '#3b82f6' : '#64748b';
+                    return `<div style="display: flex; align-items: center; gap: 6px; padding: 3px 0;">
+                        <div style="width: ${hPct}%; min-width: 20px; max-width: 60%; height: 14px; background: ${typeColor}; border-radius: 2px; opacity: 0.7;" title="${s.height}px tall"></div>
+                        <span style="font-size: 0.68rem; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;">${s.heading || s.type}</span>
+                        ${s.has_cta ? '<span style="font-size: 0.55rem; color: #f59e0b;">CTA</span>' : ''}
+                    </div>`;
+                }).join('');
+
+                sectionHTML = `
+                    <div style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 1rem; margin-top: 0.5rem;">
+                        <div style="font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem;">Section Flow (${sl.length} sections)</div>
+                        ${sectionBars}
+                    </div>
+                `;
+            }
+
+            const confNum = typeof data.confidence === 'number'
+                ? (data.confidence <= 1 ? Math.round(data.confidence * 100) : Math.round(data.confidence))
+                : 0;
+
+            return `
+                <div class="metric-header">
+                    <div class="metric-title">
+                        <span class="metric-icon">${icon}</span>
+                        ${title}
+                    </div>
+                    <span class="confidence-badge confidence-${confidenceClass}">${confNum}%</span>
+                </div>
+                <div class="metric-body">
+                    ${readingHTML}
+                    ${cardHTML}
+                    ${readingViewHTML}
+                    ${sectionHTML}
                 </div>
             `;
         }

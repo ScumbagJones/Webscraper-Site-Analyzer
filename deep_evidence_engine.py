@@ -1116,6 +1116,19 @@ class DeepEvidenceEngine:
                     'result': str(extraction_result)
                 }
 
+        # ── Content Layout Analysis ──
+        # When content type is article/blog/landing, analyze HOW content is displayed:
+        # card grid dimensions, reading width, article card styling, list vs grid vs masonry
+        _content_type = (evidence.get('content_extraction') or {}).get('page_type', '')
+        _content_layout_types = {'blogListing', 'singleArticle', 'landingPage', 'mediaListing',
+                                  'showArchive', 'podcastListing', 'productListing'}
+        if _content_type in _content_layout_types:
+            print(f"   📰 Analyzing content layout ({_content_type})...")
+            evidence['content_layout'] = await safe_extract(
+                'Content Layout',
+                lambda: self._analyze_content_layout(page, _content_type)
+            )
+
         # Design System Metrics — gate each sub-metric individually
         _any_design = any(_should_extract(k) for k in ('spacing_scale', 'responsive_breakpoints', 'shadow_system', 'z_index_stack', 'border_radius_scale'))
         if _any_design:
@@ -2877,6 +2890,260 @@ class DeepEvidenceEngine:
             'deep_paths': dom_data.get('deep_paths', []),
             'recommendation': 'Typical depth is 10-15 levels. Deeper nesting can impact rendering performance.' if max_depth > 15 else 'DOM depth is within optimal range.'
         }
+
+    async def _analyze_content_layout(self, page, page_type: str) -> Dict:
+        """
+        Analyze HOW content is displayed — not just what's there, but the reading experience.
+
+        For article/blog pages: card grid dimensions, reading width, card styling, list vs grid
+        For landing pages: section layout, hero sizing, CTA placement
+
+        This bridges the gap between "55 flexbox containers" (layout extractor)
+        and "how do they actually show articles when you read?" (user intent).
+        """
+        result = await page.evaluate("""(pageType) => {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+
+            // ── 1. Find the content container ──
+            const main = document.querySelector('main') || document.querySelector('[role="main"]') ||
+                         document.querySelector('article') || document.querySelector('.content') ||
+                         document.querySelector('#content') || document.body;
+
+            // ── 2. Reading Width Detection ──
+            // Find the narrowest max-width container that wraps main content
+            let readingContainer = main;
+            let el = main;
+            let containerMaxWidth = vw;
+            while (el && el !== document.body) {
+                const s = getComputedStyle(el);
+                const mw = parseFloat(s.maxWidth);
+                if (!isNaN(mw) && mw < vw && mw > 300) {
+                    if (mw < containerMaxWidth) {
+                        containerMaxWidth = mw;
+                        readingContainer = el;
+                    }
+                }
+                el = el.parentElement;
+            }
+
+            // Compute character width at reading container
+            const containerStyles = getComputedStyle(readingContainer);
+            const fontSize = parseFloat(containerStyles.fontSize) || 16;
+            const charsPerLine = Math.round(containerMaxWidth / (fontSize * 0.5));
+            const readingWidthVerdict = charsPerLine >= 45 && charsPerLine <= 75 ? 'optimal' :
+                                        charsPerLine < 45 ? 'too narrow' : 'too wide';
+
+            // ── 3. Card/Article Grid Detection ──
+            // Find repeating content items (articles, cards, products)
+            const cardSelectors = [
+                'article', '.card', '[class*="card"]', '.post', '[class*="post"]',
+                '.item', '[class*="item"]', '.product', '[class*="product"]',
+                '.episode', '.show', '.mix'
+            ];
+            let cards = [];
+            let cardSelector = '';
+            for (const sel of cardSelectors) {
+                const found = main.querySelectorAll(sel);
+                if (found.length >= 3 && found.length > cards.length) {
+                    cards = Array.from(found);
+                    cardSelector = sel;
+                }
+            }
+
+            let cardLayout = { type: 'none', cards_found: 0 };
+
+            if (cards.length >= 3) {
+                // Measure card dimensions
+                const rects = cards.slice(0, 20).map(c => {
+                    const r = c.getBoundingClientRect();
+                    const s = getComputedStyle(c);
+                    return {
+                        width: Math.round(r.width),
+                        height: Math.round(r.height),
+                        top: Math.round(r.top),
+                        left: Math.round(r.left),
+                        borderRadius: s.borderRadius,
+                        boxShadow: s.boxShadow,
+                        background: s.backgroundColor,
+                        border: s.border,
+                        padding: s.padding,
+                        aspectRatio: r.width > 0 ? Math.round((r.height / r.width) * 100) / 100 : 0
+                    };
+                });
+
+                // Determine layout type by analyzing card positions
+                const uniqueTops = [...new Set(rects.map(r => Math.round(r.top / 20) * 20))];
+                const uniqueLefts = [...new Set(rects.map(r => Math.round(r.left / 20) * 20))];
+
+                // Cards per row
+                const firstRowTop = rects[0].top;
+                const firstRowCards = rects.filter(r => Math.abs(r.top - firstRowTop) < 40);
+                const cardsPerRow = firstRowCards.length;
+
+                let layoutType = 'list';  // default: single column
+                if (cardsPerRow >= 3) layoutType = 'grid';
+                else if (cardsPerRow === 2) layoutType = 'two-column';
+
+                // Check for masonry (varying heights in same row)
+                if (cardsPerRow >= 2) {
+                    const heights = firstRowCards.map(r => r.height);
+                    const heightVariance = Math.max(...heights) - Math.min(...heights);
+                    if (heightVariance > 50) layoutType = 'masonry';
+                }
+
+                // Gap between cards
+                let horizontalGap = 0;
+                let verticalGap = 0;
+                if (firstRowCards.length >= 2) {
+                    horizontalGap = Math.round(firstRowCards[1].left - (firstRowCards[0].left + firstRowCards[0].width));
+                }
+                if (uniqueTops.length >= 2) {
+                    const row1 = rects.filter(r => Math.abs(r.top - rects[0].top) < 40);
+                    const row2 = rects.filter(r => Math.abs(r.top - uniqueTops[1] * 1) < 40 && Math.abs(r.top - rects[0].top) > 40);
+                    if (row1.length && row2.length) {
+                        verticalGap = Math.round(row2[0].top - (row1[0].top + row1[0].height));
+                    }
+                }
+
+                // Average card dimensions
+                const avgWidth = Math.round(rects.reduce((s, r) => s + r.width, 0) / rects.length);
+                const avgHeight = Math.round(rects.reduce((s, r) => s + r.height, 0) / rects.length);
+                const avgAspectRatio = Math.round(rects.reduce((s, r) => s + r.aspectRatio, 0) / rects.length * 100) / 100;
+
+                // Card has image?
+                const cardsWithImages = cards.slice(0, 10).filter(c => c.querySelector('img, picture, video')).length;
+                const imageRatio = cardsWithImages / Math.min(cards.length, 10);
+
+                // Card content structure
+                const sampleCard = cards[0];
+                const cardAnatomy = {
+                    has_image: !!sampleCard.querySelector('img, picture, video'),
+                    has_heading: !!sampleCard.querySelector('h1, h2, h3, h4'),
+                    has_text: !!sampleCard.querySelector('p, .excerpt, .description, .summary'),
+                    has_meta: !!sampleCard.querySelector('time, .date, .author, .category, .tag'),
+                    has_cta: !!sampleCard.querySelector('a[class*="btn"], a[class*="button"], button'),
+                    has_badge: !!sampleCard.querySelector('.badge, .tag, .label, .category, [class*="badge"]')
+                };
+
+                // Card styling
+                const firstStyle = rects[0];
+                const cardStyling = {
+                    border_radius: firstStyle.borderRadius,
+                    has_shadow: firstStyle.boxShadow !== 'none',
+                    has_border: firstStyle.border !== 'none' && firstStyle.border !== '',
+                    background: firstStyle.background,
+                    padding: firstStyle.padding
+                };
+
+                cardLayout = {
+                    type: layoutType,
+                    cards_found: cards.length,
+                    cards_per_row: cardsPerRow,
+                    selector: cardSelector,
+                    avg_width: avgWidth,
+                    avg_height: avgHeight,
+                    avg_aspect_ratio: avgAspectRatio,
+                    horizontal_gap: Math.max(0, horizontalGap),
+                    vertical_gap: Math.max(0, verticalGap),
+                    image_ratio: Math.round(imageRatio * 100),
+                    card_anatomy: cardAnatomy,
+                    card_styling: cardStyling,
+                    dimensions_note: `${avgWidth}×${avgHeight}px cards in ${layoutType} layout (${cardsPerRow} per row)`
+                };
+            }
+
+            // ── 4. Article Reading View (for single articles) ──
+            let readingView = null;
+            if (pageType === 'singleArticle') {
+                const article = document.querySelector('article') || main;
+                const articleRect = article.getBoundingClientRect();
+                const articleStyle = getComputedStyle(article);
+
+                // Text metrics
+                const paragraphs = article.querySelectorAll('p');
+                const lineHeights = Array.from(paragraphs).slice(0, 5).map(p => {
+                    const s = getComputedStyle(p);
+                    return parseFloat(s.lineHeight) / parseFloat(s.fontSize);
+                }).filter(v => !isNaN(v));
+
+                const avgLineHeight = lineHeights.length ?
+                    Math.round(lineHeights.reduce((a, b) => a + b, 0) / lineHeights.length * 100) / 100 : 0;
+
+                // Pull quotes, blockquotes, code blocks
+                const pullQuotes = article.querySelectorAll('blockquote, .pullquote, .highlight-quote').length;
+                const codeBlocks = article.querySelectorAll('pre, code, .code-block').length;
+                const inlineImages = article.querySelectorAll('img, figure').length;
+
+                readingView = {
+                    content_width: Math.round(articleRect.width),
+                    font_size: Math.round(fontSize),
+                    line_height_ratio: avgLineHeight,
+                    chars_per_line: charsPerLine,
+                    pull_quotes: pullQuotes,
+                    code_blocks: codeBlocks,
+                    inline_images: inlineImages,
+                    paragraph_count: paragraphs.length,
+                    reading_comfort: readingWidthVerdict
+                };
+            }
+
+            // ── 5. Section Layout (for landing pages) ──
+            let sectionLayout = null;
+            if (pageType === 'landingPage') {
+                const sections = Array.from(main.querySelectorAll('section, [class*="section"]')).slice(0, 10);
+                sectionLayout = sections.map((s, i) => {
+                    const r = s.getBoundingClientRect();
+                    const st = getComputedStyle(s);
+                    const heading = s.querySelector('h1, h2, h3');
+                    const bg = st.backgroundColor;
+                    return {
+                        index: i,
+                        heading: heading?.innerText?.trim()?.substring(0, 60) || null,
+                        height: Math.round(r.height),
+                        width: Math.round(r.width),
+                        background: bg,
+                        has_cta: !!s.querySelector('a[class*="btn"], a[class*="button"], button'),
+                        children_count: s.children.length,
+                        spans_viewport: r.width >= vw * 0.95,
+                        type: r.height > vh * 0.8 ? 'hero' : r.height > 200 ? 'content' : 'compact'
+                    };
+                });
+            }
+
+            return {
+                reading_width: {
+                    container_max_width: Math.round(containerMaxWidth),
+                    font_size: Math.round(fontSize),
+                    chars_per_line: charsPerLine,
+                    verdict: readingWidthVerdict,
+                    container_selector: readingContainer.tagName.toLowerCase() +
+                        (readingContainer.className ? '.' + readingContainer.className.split(' ')[0] : '')
+                },
+                card_layout: cardLayout,
+                reading_view: readingView,
+                section_layout: sectionLayout,
+                viewport: { width: vw, height: vh }
+            };
+        }""", page_type)
+
+        # Add confidence and pattern summary
+        cl = result.get('card_layout', {})
+        rw = result.get('reading_width', {})
+        rv = result.get('reading_view')
+
+        parts = []
+        if cl.get('type') != 'none':
+            parts.append(f"{cl.get('cards_found', 0)} cards in {cl.get('type')} layout ({cl.get('cards_per_row', 1)}/row)")
+        if rw.get('verdict'):
+            parts.append(f"Reading width: {rw.get('chars_per_line', 0)} chars/line ({rw.get('verdict')})")
+        if rv:
+            parts.append(f"Article: {rv.get('paragraph_count', 0)} paragraphs, {rv.get('font_size', 16)}px font")
+
+        result['pattern'] = ' · '.join(parts) if parts else 'Content layout analyzed'
+        result['confidence'] = 75 if cl.get('type') != 'none' else 50
+
+        return result
 
     async def _extract_seo(self, page):
         """Extract SEO-related metadata"""
