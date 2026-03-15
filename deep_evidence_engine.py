@@ -1464,12 +1464,14 @@ class DeepEvidenceEngine:
         for label, page in valid_pages.items():
             spacing = page.get('spacing_scale', {})
             base_unit = spacing.get('base_unit', None)
-            if base_unit and 'px' in base_unit:
-                # Extract numeric value
+            if base_unit is not None:
+                # Handle both string "4px" and int 4 formats
                 try:
-                    value = int(base_unit.replace('px', '').strip())
-                    spacing_units.append(value)
-                except (ValueError, AttributeError):
+                    if isinstance(base_unit, (int, float)):
+                        spacing_units.append(int(base_unit))
+                    elif isinstance(base_unit, str) and 'px' in base_unit:
+                        spacing_units.append(int(base_unit.replace('px', '').strip()))
+                except (ValueError, AttributeError, TypeError):
                     pass
 
         if len(spacing_units) >= 2:
