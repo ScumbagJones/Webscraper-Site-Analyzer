@@ -19,3 +19,9 @@ browser_sessions/
 server.pid
 .DS_Store
 website-understanding-sdk/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
