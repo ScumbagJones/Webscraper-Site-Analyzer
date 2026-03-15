@@ -1120,13 +1120,20 @@ class DeepEvidenceEngine:
         # When content type is article/blog/landing, analyze HOW content is displayed:
         # card grid dimensions, reading width, article card styling, list vs grid vs masonry
         _content_type = (evidence.get('content_extraction') or {}).get('page_type', '')
-        _content_layout_types = {'blogListing', 'singleArticle', 'landingPage', 'mediaListing',
-                                  'showArchive', 'podcastListing', 'productListing'}
-        if _content_type in _content_layout_types:
+        # Always run content layout — card grids, reading width, and section flow
+        # are valuable regardless of page classification
+        if _content_type:
             print(f"   📰 Analyzing content layout ({_content_type})...")
             evidence['content_layout'] = await safe_extract(
                 'Content Layout',
                 lambda: self._analyze_content_layout(page, _content_type)
+            )
+        elif _should_extract('content_extraction'):
+            # Even if content extraction failed, try with generic type
+            print(f"   📰 Analyzing content layout (generic)...")
+            evidence['content_layout'] = await safe_extract(
+                'Content Layout',
+                lambda: self._analyze_content_layout(page, 'generic')
             )
 
         # Design System Metrics — gate each sub-metric individually
@@ -3172,7 +3179,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': f"SEO Score: {score}/100",
-            'confidence': 90,
+            'confidence': score,  # confidence tracks score — all checks are deterministic
             'score': score,
             'details': seo_data,
             'recommendations': self._generate_seo_recommendations(seo_data)

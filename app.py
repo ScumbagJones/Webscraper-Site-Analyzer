@@ -189,8 +189,20 @@ def deep_scan():
 
     except Exception as e:
         logger.error(f"Error during scan: {e}", exc_info=True)
+        err_type = type(e).__name__
+        err_msg = str(e)[:200]
+        # Give user a more specific error without leaking internal paths
+        if 'timeout' in err_msg.lower() or 'Timeout' in err_type:
+            hint = 'The page took too long to respond. Try a lighter page.'
+        elif 'net::ERR' in err_msg or 'Navigation' in err_msg:
+            hint = 'Could not reach the site. Check the URL and try again.'
+        elif 'browser' in err_msg.lower() or 'chromium' in err_msg.lower():
+            hint = 'Browser engine error. Try restarting the server.'
+        else:
+            hint = 'The site may be blocking automated access or is temporarily unavailable.'
         return jsonify({
-            'error': 'Scan failed. The site may be blocking automated access or is temporarily unavailable.',
+            'error': f'Scan failed: {hint}',
+            'detail': f'{err_type}: {err_msg}',
             'suggestion': 'Try a different page or check server logs for details.'
         }), 500
 

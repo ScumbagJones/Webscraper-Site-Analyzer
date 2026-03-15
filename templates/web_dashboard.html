@@ -2633,6 +2633,9 @@
 
                 if (data.error) {
                     let errorMsg = 'Error: ' + data.error;
+                    if (data.detail) {
+                        errorMsg += '\n\nDetail: ' + data.detail;
+                    }
                     if (data.suggestion) {
                         errorMsg += '\n\nSuggestion: ' + data.suggestion;
                     }
@@ -4173,7 +4176,7 @@
                     name: 'Layout & Structure',
                     metrics: [
                         { key: 'layout', icon: '📐', title: 'Layout System' },
-                        { key: 'content_layout', icon: '📰', title: 'Content Layout' },
+                        { key: 'content_layout', icon: '📰', title: 'Reading Experience' },
                         { key: 'accessibility_tree', icon: '🏗', title: 'Page Blueprint' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
@@ -4551,7 +4554,17 @@
                 inventoryHTML += '</div>';
                 inventoryEl.innerHTML = inventoryHTML;
             } else {
-                inventoryEl.innerHTML = '<div style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 6px; color: #666; font-size: 0.85rem;">No structured content inventory detected. This page has minimal repeating content elements.</div>';
+                const _pageType = extraction.page_type || '';
+                const _ptLabel = {
+                    landingPage: 'Landing Page', singleArticle: 'Article', blogListing: 'Blog',
+                    productListing: 'Store', audioStream: 'Audio Stream', podcastListing: 'Podcast',
+                    showArchive: 'Show Archive', documentation: 'Documentation', apiReference: 'API Reference'
+                }[_pageType] || _pageType;
+                inventoryEl.innerHTML = `<div style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 6px; color: #888; font-size: 0.85rem;">
+                    ${_pageType === 'landingPage'
+                        ? `<div style="margin-bottom:6px; font-weight:600; color:#ff9f0a;">📄 Detected as: ${_ptLabel}</div>Landing pages typically focus on a single message with a hero + CTA rather than structured content like articles or product grids. Check <strong>Visual Hierarchy</strong> and <strong>Spatial Composition</strong> for layout details.`
+                        : `No structured content inventory detected for this ${_ptLabel || 'page'}. The page has minimal repeating content elements.`}
+                </div>`;
             }
 
             // Content Samples
@@ -4583,7 +4596,11 @@
                 samplesHTML += '</div>';
                 samplesEl.innerHTML = samplesHTML;
             } else {
-                samplesEl.innerHTML = '<div style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 6px; color: #666; font-size: 0.85rem;">No repeating content patterns found. This page may be a single-purpose page (landing page, about page) rather than a list/catalog page.</div>';
+                samplesEl.innerHTML = `<div style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 6px; color: #888; font-size: 0.85rem;">
+                    No repeating content patterns found. ${(extraction.page_type === 'landingPage')
+                        ? 'Landing pages use unique sections (hero, features, testimonials) rather than repeated templates. Look at <strong>Spatial Composition</strong> for section-by-section breakdown.'
+                        : 'This page uses unique sections rather than repeated card or list templates.'}
+                </div>`;
             }
 
             // Extraction Strategy
@@ -4699,18 +4716,19 @@
             let semanticHTML = '<div style="padding: 1.25rem; background: #1e1e1e; border-radius: 8px;">';
 
             if (semantic.score !== undefined) {
-                const scoreColor = semantic.score >= 80 ? '#00ff88' : semantic.score >= 60 ? '#ff9f0a' : '#ff453a';
-                const qualityLabel = semantic.quality || (semantic.score >= 80 ? 'Good' : semantic.score >= 60 ? 'Fair' : 'Poor');
+                const _semScore = Math.min(semantic.score, 100);
+                const scoreColor = _semScore >= 80 ? '#00ff88' : _semScore >= 60 ? '#ff9f0a' : '#ff453a';
+                const qualityLabel = semantic.quality || (_semScore >= 80 ? 'Good' : _semScore >= 60 ? 'Fair' : 'Poor');
 
                 semanticHTML += `
                     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem;">
                         <div style="display: flex; align-items: baseline; gap: 0.5rem;">
-                            <span style="font-size: 1.5rem; font-weight: 700; color: ${scoreColor};">${semantic.score}</span>
+                            <span style="font-size: 1.5rem; font-weight: 700; color: ${scoreColor};">${Math.min(semantic.score, 100)}</span>
                             <span style="color: #888; font-size: 0.85rem;">/ 100</span>
                         </div>
                         <div style="flex: 1; display: flex; align-items: center; gap: 0.75rem;">
                             <div style="flex: 1; background: #0a0a0a; border-radius: 4px; height: 8px; overflow: hidden;">
-                                <div style="background: ${scoreColor}; width: ${semantic.score}%; height: 100%; border-radius: 4px; transition: width 1s ease;"></div>
+                                <div style="background: ${scoreColor}; width: ${Math.min(semantic.score, 100)}%; height: 100%; border-radius: 4px; transition: width 1s ease;"></div>
                             </div>
                             <span style="color: ${scoreColor}; font-size: 0.8rem; font-weight: 600; white-space: nowrap;">${qualityLabel}</span>
                         </div>
@@ -4928,7 +4946,7 @@
                     icon: '📐',
                     metrics: [
                         { key: 'layout', icon: '📐', title: 'Layout System' },
-                        { key: 'content_layout', icon: '📰', title: 'Content Layout' },
+                        { key: 'content_layout', icon: '📰', title: 'Reading Experience' },
                         { key: 'accessibility_tree', icon: '🏗', title: 'Page Blueprint' },
                         { key: 'spatial_composition', icon: '🗺', title: 'Spatial Composition' },
                         { key: 'responsive_breakpoints', icon: '📱', title: 'Responsive Breakpoints' },
@@ -5400,7 +5418,7 @@
                 bodyHTML = createInformationArchitectureCard(icon, title, data, confidenceClass);
             } else if (title === 'API Map' || title === 'API Patterns') {
                 bodyHTML = createAPIMapCard(icon, title, data, confidenceClass);
-            } else if (title === 'Content Layout' || title === 'Reading Experience') {
+            } else if (title === 'Reading Experience' || title === 'Content Layout') {
                 bodyHTML = createContentLayoutCard(icon, title, data, confidenceClass);
             } else {
                 bodyHTML = createDefaultCardBody(icon, title, data, confidenceClass);
@@ -7133,6 +7151,18 @@
 
         // ── Accessibility Card ─────────────────────────────────────────
         function createAccessibilityCard(icon, title, data, confidenceClass) {
+            // Graceful error state
+            if (data.error || data.pattern === 'Analysis Failed') {
+                return `
+                    <div class="metric-header"><div class="metric-title"><span class="metric-icon">${icon}</span>${title}</div></div>
+                    <div class="metric-body">
+                        <div style="text-align:center; padding:1.5rem 0; color:#888;">
+                            <div style="font-size:1.5rem; margin-bottom:8px; opacity:0.5;">♿</div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#ff9f0a;">Couldn't analyze accessibility</div>
+                            <div style="font-size:0.75rem; color:#666; margin-top:4px;">The accessibility checker encountered an issue on this page. Try a single-page scan for full results.</div>
+                        </div>
+                    </div>`;
+            }
             const score = data.score || 0;
             const details = data.details || {};
             const contrast = data.contrast_analysis || {};
@@ -7742,6 +7772,15 @@
         // Shows HOW content is displayed: card grid dimensions, reading width,
         // article card styling, list vs grid vs masonry
         function createContentLayoutCard(icon, title, data, confidenceClass) {
+            if (data.error || data.pattern === 'Analysis Failed') {
+                return `
+                    <div class="metric-header"><div class="metric-title"><span class="metric-icon">${icon}</span>${title}</div></div>
+                    <div class="metric-body"><div style="text-align:center; padding:1.5rem 0; color:#888;">
+                        <div style="font-size:1.5rem; margin-bottom:8px; opacity:0.5;">📰</div>
+                        <div style="font-size:0.85rem; font-weight:600; color:#ff9f0a;">Layout analysis unavailable</div>
+                        <div style="font-size:0.75rem; color:#666; margin-top:4px;">Check the Layout System and Spatial Composition cards for structural details.</div>
+                    </div></div>`;
+            }
             const cl = data.card_layout || {};
             const rw = data.reading_width || {};
             const rv = data.reading_view;
@@ -8454,6 +8493,15 @@
 
         // ── API Map Card ────────────────────────────────────────────────
         function createAPIMapCard(icon, title, data, confidenceClass) {
+            if (data.error || data.pattern === 'Analysis Failed') {
+                return `
+                    <div class="metric-header"><div class="metric-title"><span class="metric-icon">${icon}</span>${title}</div></div>
+                    <div class="metric-body"><div style="text-align:center; padding:1.5rem 0; color:#888;">
+                        <div style="font-size:1.5rem; margin-bottom:8px; opacity:0.5;">📡</div>
+                        <div style="font-size:0.85rem; font-weight:600; color:#ff9f0a;">No API patterns detected</div>
+                        <div style="font-size:0.75rem; color:#666; margin-top:4px;">This page may not make external API calls, or the analysis couldn't complete.</div>
+                    </div></div>`;
+            }
             const rm = data.relationship_map || {};
             const sem = rm.semantic_classification || {};
             const stats = rm.stats || {};
@@ -8916,6 +8964,15 @@
 
         // ── Motion Tokens Card ──────────────────────────────────────────
         function createMotionTokensCard(icon, title, data, confidenceClass) {
+            if (data.error || data.pattern === 'Analysis Failed') {
+                return `
+                    <div class="metric-header"><div class="metric-title"><span class="metric-icon">${icon}</span>${title}</div></div>
+                    <div class="metric-body"><div style="text-align:center; padding:1.5rem 0; color:#888;">
+                        <div style="font-size:1.5rem; margin-bottom:8px; opacity:0.5;">🎬</div>
+                        <div style="font-size:0.85rem; font-weight:600; color:#ff9f0a;">No motion detected</div>
+                        <div style="font-size:0.75rem; color:#666; margin-top:4px;">This page doesn't appear to use CSS transitions or animations, or the analysis couldn't complete.</div>
+                    </div></div>`;
+            }
             const details       = data.details || {};
             const durScale      = details.duration_scale || {};
             const easingPalette = details.easing_palette || {};
@@ -9368,6 +9425,15 @@
 
         // ── Semantic Structure Card (Accessibility Tree) ────────────────
         function createSemanticStructureCard(icon, title, data, confidenceClass) {
+            if (data.error || data.pattern === 'Analysis Failed') {
+                return `
+                    <div class="metric-header"><div class="metric-title"><span class="metric-icon">${icon}</span>${title}</div></div>
+                    <div class="metric-body"><div style="text-align:center; padding:1.5rem 0; color:#888;">
+                        <div style="font-size:1.5rem; margin-bottom:8px; opacity:0.5;">🏗</div>
+                        <div style="font-size:0.85rem; font-weight:600; color:#ff9f0a;">Page blueprint unavailable</div>
+                        <div style="font-size:0.75rem; color:#666; margin-top:4px;">The page structure analyzer couldn't complete for this page.</div>
+                    </div></div>`;
+            }
             // Translate landmark types to plain language
             const landmarkNames = {
                 'header': { name: 'Header', icon: '▬', color: '#6c9eff', desc: 'Top banner area' },
@@ -9652,6 +9718,18 @@
 
         // ── Axe Contrast Audit Card ──────────────────────────────────────
         function createContrastAuditCard(icon, title, data, confidenceClass) {
+            // Graceful error state
+            if (data.error || data.pattern === 'Analysis Failed') {
+                return `
+                    <div class="metric-header"><div class="metric-title"><span class="metric-icon">${icon}</span>${title}</div></div>
+                    <div class="metric-body">
+                        <div style="text-align:center; padding:1.5rem 0; color:#888;">
+                            <div style="font-size:1.5rem; margin-bottom:8px; opacity:0.5;">👁</div>
+                            <div style="font-size:0.85rem; font-weight:600; color:#ff9f0a;">Couldn't check readability</div>
+                            <div style="font-size:0.75rem; color:#666; margin-top:4px;">The contrast checker needs axe-core installed. Run: <code style="color:#6c9eff;">npm install axe-core --prefix ./website-understanding-sdk</code></div>
+                        </div>
+                    </div>`;
+            }
             const d = data.details || {};
             const violations  = d.violations || [];
             const severity    = d.severity || {};
