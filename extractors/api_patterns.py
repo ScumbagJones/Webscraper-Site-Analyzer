@@ -48,7 +48,7 @@ class APIPatternExtractor(BaseExtractor):
 
         return {
             'pattern': self._determine_api_pattern(patterns),
-            'confidence': 90,
+            'confidence': min(90, 40 + len((relationship_map or {}).get('endpoints', [])) * 5),
             'details': patterns,
             'relationship_map': relationship_map
         }

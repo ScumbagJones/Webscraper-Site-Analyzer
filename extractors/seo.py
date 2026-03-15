@@ -184,7 +184,7 @@ class SEOExtractor(BaseExtractor):
 
         return {
             'pattern': f"SEO Score: {score}/100",
-            'confidence': 90,
+            'confidence': score,
             'score': score,
             'details': seo_data,
             'brand_assets': brand_assets,

@@ -372,7 +372,7 @@ class DesignSystemMetrics:
 
         if not result:
             return {
-                'confidence': 50,
+                'confidence': 85,
                 'pattern': 'No shadows detected',
                 'scale': {},
                 'levels': [],

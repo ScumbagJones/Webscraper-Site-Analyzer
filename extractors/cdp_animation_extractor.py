@@ -111,7 +111,7 @@ class CdpAnimationExtractor(BaseExtractor):
         if not animations:
             return {
                 "pattern": "No runtime animations observed",
-                "confidence": 40,
+                "confidence": 75,
                 "details": {
                     "count": 0,
                     "animations": [],

@@ -41,7 +41,7 @@ class NetworkExtractor(BaseExtractor):
 
         return {
             'pattern': f"{len(third_party['analytics'])} analytics services detected",
-            'confidence': 90,
+            'confidence': min(90, 40 + sum(len(v) for v in third_party.values()) * 10),
             'details': third_party
         }
 

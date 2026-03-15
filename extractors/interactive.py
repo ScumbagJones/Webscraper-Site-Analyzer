@@ -194,7 +194,7 @@ class InteractiveExtractor(BaseExtractor):
 
         return {
             'pattern': ', '.join(parts) if parts else 'No interactive elements',
-            'confidence': 90,
+            'confidence': min(95, 50 + sum(counts.values()) * 2),
             'counts': counts,
             'button_styles': _buttonStyles,
             'buttons': _buttons,

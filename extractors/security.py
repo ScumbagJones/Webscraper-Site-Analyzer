@@ -59,7 +59,7 @@ class SecurityExtractor(BaseExtractor):
 
         return {
             'pattern': f"Security: {grade} ({score}/100)",
-            'confidence': 95,
+            'confidence': score,
             'score': score,
             'grade': grade,
             'checks': checks,

@@ -87,7 +87,7 @@ class AnimationExtractor(BaseExtractor):
 
         anim_result = {
             'pattern': self._determine_animation_pattern(anim_data),
-            'confidence': 85,
+            'confidence': min(90, 40 + len(anim_data.get('animations', [])) * 5),
             'details': anim_data,
             'code_snippets': self._generate_animation_snippets(anim_data)
         }

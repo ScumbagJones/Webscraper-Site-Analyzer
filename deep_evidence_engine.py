@@ -2516,7 +2516,7 @@ class DeepEvidenceEngine:
 
         result = {
             'pattern': self._determine_typo_pattern(typo_data),
-            'confidence': 95,
+            'confidence': min(95, 50 + len(typo_data.get('font_families', [])) * 10 + (15 if type_scale else 0)),
             'details': typo_data,
             'type_scale': type_scale,
             'code_snippets': self._generate_typo_snippets(typo_data)
@@ -2682,7 +2682,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': self._determine_animation_pattern(anim_data),
-            'confidence': 85,
+            'confidence': min(90, 40 + len(anim_data.get('animations', [])) * 5),
             'details': anim_data,
             'code_snippets': self._generate_animation_snippets(anim_data)
         }
@@ -2720,7 +2720,7 @@ class DeepEvidenceEngine:
 
         result = {
             'pattern': f"Accessibility Score: {score}/100",
-            'confidence': 90,
+            'confidence': score,
             'score': score,
             'details': a11y_data,
             'recommendations': self._generate_a11y_recommendations(a11y_data, contrast_analysis)
@@ -3212,7 +3212,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': f"Security Score: {score}/100",
-            'confidence': 95,
+            'confidence': score,
             'score': score,
             'details': security_data,
             'recommendations': self._generate_security_recommendations(security_data)
@@ -3251,7 +3251,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': self._determine_api_pattern(patterns),
-            'confidence': 90,
+            'confidence': min(90, 40 + len((relationship_map or {}).get('endpoints', [])) * 5),
             'details': patterns,
             'code_snippets': self._generate_api_snippets(patterns),
             'relationship_map': relationship_map  # NEW: API relationships
@@ -3536,7 +3536,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': f"{len(css_data['custom_properties'])} CSS variables detected",
-            'confidence': 85,
+            'confidence': min(90, 50 + len(css_data.get('custom_properties', [])) * 2),
             'details': css_data,
             'code_snippets': self._generate_css_tricks_snippets(css_data)
         }
@@ -3701,7 +3701,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': ', '.join(parts) if parts else 'No interactive elements',
-            'confidence': 90,
+            'confidence': min(95, 50 + sum(counts.values()) * 2),
             'counts': counts,
             'button_styles': interactive_data.get('buttonStyles', []),
             'buttons': interactive_data.get('buttons', []),
@@ -3738,7 +3738,7 @@ class DeepEvidenceEngine:
 
         return {
             'pattern': f"{len(third_party['analytics'])} analytics services detected",
-            'confidence': 90,
+            'confidence': min(90, 40 + sum(len(v) for v in third_party.values()) * 10),
             'details': third_party
         }
 

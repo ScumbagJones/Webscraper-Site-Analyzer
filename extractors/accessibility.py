@@ -51,7 +51,7 @@ class AccessibilityExtractor(BaseExtractor):
 
         result = {
             'pattern': f"Accessibility Score: {score}/100",
-            'confidence': 90,
+            'confidence': score,
             'score': score,
             'details': a11y_data,
             'recommendations': self._generate_a11y_recommendations(a11y_data, contrast_analysis)

@@ -432,81 +432,8 @@
             font-size: 1.1rem;
         }
 
-        .confidence-badge {
-            padding: 0.2rem 0.5rem;
-            border-radius: var(--radius-full);
-            font-family: var(--font-mono);
-            font-size: var(--text-xs);
-            font-weight: 600;
-        }
-
-        .confidence-high {
-            background: var(--success-muted);
-            color: var(--success);
-        }
-
-        .confidence-medium {
-            background: var(--warning-muted);
-            color: var(--warning);
-        }
-
-        .confidence-low {
-            background: var(--danger-muted);
-            color: var(--danger);
-        }
-
-        /* Confidence filter toolbar */
-        .confidence-filter-bar {
-            display: none;
-            align-items: center;
-            gap: var(--space-4);
-            padding: var(--space-3) var(--space-5);
-            background: var(--surface-0);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            margin-bottom: var(--space-4);
-            flex-wrap: wrap;
-        }
-        .confidence-filter-bar.visible { display: flex; }
-        .confidence-filter-bar label {
-            font-size: var(--text-sm);
-            color: var(--text-tertiary);
-            white-space: nowrap;
-        }
-        .confidence-filter-bar input[type=range] {
-            flex: 1;
-            min-width: 120px;
-            max-width: 200px;
-            accent-color: var(--accent-text);
-        }
-        .conf-threshold-value {
-            font-family: var(--font-mono);
-            font-size: var(--text-sm);
-            font-weight: 600;
-            color: var(--accent-text);
-            min-width: 36px;
-        }
-        .conf-hidden-count {
-            font-size: var(--text-xs);
-            color: var(--text-tertiary);
-            margin-left: auto;
-        }
-
-        /* Cards below confidence threshold — dimmed but always visible */
-        .metric-card.conf-suppressed {
-            opacity: 0.45;
-            filter: grayscale(0.3);
-            transition: opacity 0.3s, filter 0.3s;
-        }
-        .metric-card.conf-suppressed:hover {
-            opacity: 0.7;
-            filter: grayscale(0.1);
-        }
-        /* Confidence badge stays fully readable even on dimmed cards */
-        .metric-card.conf-suppressed .confidence-badge {
-            opacity: 1;
-            filter: none;
-        }
+        /* Confidence badges removed — values were not evidence-backed */
+        .confidence-badge { display: none; }
 
         .metric-value {
             font-family: var(--font-display);
@@ -2289,14 +2216,8 @@
                     </div>
                 </div>
 
-                <!-- Confidence filter toolbar (shown after results load) -->
-                <div class="confidence-filter-bar" id="confidenceFilterBar">
-                    <label for="confThresholdSlider">Hide metrics below</label>
-                    <input type="range" id="confThresholdSlider" min="0" max="95" step="5" value="40">
-                    <span class="conf-threshold-value" id="confThresholdValue">40%</span>
-                    <span class="conf-hidden-count" id="confHiddenCount"></span>
-                    <button onclick="resetConfidenceFilter()" style="font-size:var(--text-xs); color:var(--text-tertiary); background:none; border:none; cursor:pointer; padding:0 var(--space-2);">Reset</button>
-                    <span style="width:1px; height:16px; background:var(--border-subtle); margin:0 var(--space-1);"></span>
+                <!-- Toolbar -->
+                <div style="display:flex; align-items:center; gap:var(--space-4); margin-bottom:var(--space-4);">
                     <button id="expandCollapseBtn" onclick="toggleExpandAll()" style="font-size:var(--text-xs); color:var(--text-tertiary); background:none; border:1px solid var(--border-default); border-radius:var(--radius-sm); cursor:pointer; padding:var(--space-1) var(--space-3); font-family:var(--font-body); white-space:nowrap;">Expand All</button>
                 </div>
 
@@ -4451,7 +4372,7 @@
 
             // Display metrics
             displayMetrics(evidence);
-            showConfidenceFilter();
+            // (confidence filter removed)
 
             // Display articles
             if (evidence.article_content && evidence.article_content.articles) {
@@ -5110,10 +5031,10 @@
                     'No outliers': 10
                 },
                 examples: {
-                    '95-100': 'Perfect geometric scale with 30+ instances',
-                    '80-94': 'Strong pattern with minor outliers',
-                    '60-79': 'Noticeable pattern but inconsistent',
-                    '40-59': 'Weak pattern, many outliers'
+                    '95-100': 'Detected 30+ spacing instances matching a base unit multiple',
+                    '80-94': 'Base unit found with most values conforming',
+                    '60-79': 'Pattern detected but values vary',
+                    '40-59': 'Few values match a consistent base'
                 }
             },
             'responsive_breakpoints': {
@@ -5167,10 +5088,10 @@
                     'Skip navigation': 10
                 },
                 examples: {
-                    '90-100': 'Excellent - WCAG AAA compliant',
-                    '75-89': 'Good - WCAG AA compliant',
-                    '60-74': 'Fair - Some issues',
-                    '40-59': 'Poor - Many issues'
+                    '90-100': 'Semantic HTML, ARIA labels, and alt text all present',
+                    '75-89': 'Most accessibility signals present',
+                    '60-74': 'Some accessibility signals missing',
+                    '40-59': 'Limited accessibility signals detected'
                 }
             },
             'seo_score': {
@@ -5222,10 +5143,10 @@
                     'Keyframe animations': 20
                 },
                 examples: {
-                    '90-100': 'Rich motion system with 50+ transitions, named curves, clear tiers',
-                    '70-89': 'Good motion with several durations and easing functions',
-                    '40-69': 'Basic transitions, limited variety',
-                    '0-39': 'Minimal or no motion detected'
+                    '90-100': '50+ transitions detected with distinct duration tiers and easing curves',
+                    '70-89': 'Multiple durations and easing functions found',
+                    '40-69': 'Few transitions detected',
+                    '0-39': 'Minimal or no CSS transitions found'
                 }
             },
             'spatial_composition': {
@@ -5239,9 +5160,9 @@
                     'Base confidence': 50
                 },
                 examples: {
-                    '85-95': 'Well-structured site with clear zones, landmarks, and layout containers',
-                    '70-84': 'Good structure with most landmarks present',
-                    '50-69': 'Basic structure, limited semantic HTML'
+                    '85-95': 'Semantic landmarks, flex/grid containers, and 20+ elements detected',
+                    '70-84': 'Most semantic landmarks present',
+                    '50-69': 'Limited semantic HTML landmarks found'
                 }
             }
         };
@@ -5549,8 +5470,7 @@
                     const layerEntries = Array.isArray(layersRaw) ? layersRaw : Object.values(layersRaw);
                     const count = layerEntries.length;
                     const maxZ = Math.max(...layerEntries.map(l => l.z_index ?? l.z ?? l.value ?? 0), 0);
-                    const health = count <= 5 && maxZ <= 1000 ? 'clean architecture' : count <= 10 ? 'moderate complexity' : 'complex layering';
-                    return `${count} layers, ${health}`;
+                    return `${count} layers, max z-index ${maxZ}`;
                 }
                 case 'Spacing Scale': {
                     const scale = data.scale || data.values || [];
@@ -5701,7 +5621,7 @@
                     <div style="background: var(--surface-0); padding: 1rem; border-radius: 6px; margin-top: 1rem;">
                         <div style="font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">Security Breakdown:</div>
                         <div style="color: var(--text-tertiary); font-size: 0.85rem; line-height: 1.6;">
-                            Score of ${data.confidence}/100 indicates ${data.confidence >= 80 ? 'excellent' : data.confidence >= 60 ? 'good' : 'needs improvement'} security posture.
+                            Checked ${Object.keys(data.details || {}).length} security signals (HTTPS, CSP, CORS, security headers).
                         </div>
                     </div>
                 ` : ''}
@@ -5759,7 +5679,7 @@
                     <div style="margin-top: 1rem; padding: 1rem; background: rgba(52, 199, 89, 0.1); border-radius: 6px;">
                         <div style="color: #34c759; font-size: 0.85rem; line-height: 1.5;">
                             ${frequencyEntries[0] ? `
-                                💡 <strong>${frequencyEntries[0][0]}</strong> is the dominant spacing value (${(data.total_instances ? (frequencyEntries[0][1] / data.total_instances * 100) : 0).toFixed(0)}% of all spacing). ${frequencyEntries.length <= 5 ? 'Highly disciplined architecture!' : 'Consider consolidating less-used values for consistency.'}
+                                💡 <strong>${frequencyEntries[0][0]}</strong> is the dominant spacing value (${(data.total_instances ? (frequencyEntries[0][1] / data.total_instances * 100) : 0).toFixed(0)}% of all spacing). ${frequencyEntries.length} distinct spacing values used across ${data.total_instances || '?'} elements.
                             ` : 'No spacing data available'}
                         </div>
                     </div>
@@ -6412,7 +6332,7 @@
             // Health summary line
             const healthEmoji = healthLevel === 'Clean' ? '✓' : healthLevel === 'Complex' ? '⚠' : healthLevel === 'Chaotic' ? '✗' : '?';
             const healthColor = { 'Clean': '#69f0ae', 'Complex': '#ffab40', 'Chaotic': '#ff5252', 'Unknown': '#666' }[healthLevel] || '#666';
-            const healthSummary = health.detail || (healthLevel === 'Clean' ? 'Well-organized layer structure' : healthLevel === 'Complex' ? 'Multiple layering levels — review for simplification' : healthLevel === 'Chaotic' ? 'Tangled layers — likely z-index conflicts' : '');
+            const healthSummary = health.detail || '';
 
             // Header area: layer count + health
             const headerHTML = `
@@ -6708,9 +6628,9 @@
                 <div style="margin: 1.5rem 0; padding: 1.5rem; background: rgba(10, 10, 10, 0.4); border-radius: 12px;">
                     <div style="display: flex; align-items: center; gap: 2rem;">
                         <div style="flex: 1;">
-                            <div style="font-size: 3rem; font-weight: 700; color: ${health === 'excellent' ? '#34c759' : health === 'good' ? '#0a84ff' : health === 'acceptable' ? '#ff9f0a' : '#ff6b6b'}; line-height: 1;">${maxDepth}</div>
+                            <div style="font-size: 3rem; font-weight: 700; color: ${maxDepth <= 10 ? '#34c759' : maxDepth <= 15 ? '#0a84ff' : maxDepth <= 20 ? '#ff9f0a' : '#ff6b6b'}; line-height: 1;">${maxDepth}</div>
                             <div style="font-size: 0.85rem; color: #888; margin-top: 0.25rem;">Max Nesting Level</div>
-                            ${data.complexity ? `<div style="font-size: 0.75rem; margin-top: 0.5rem; color: ${health === 'excellent' || health === 'good' ? '#34c759' : health === 'acceptable' ? '#ff9f0a' : '#ff9f0a'};">${data.complexity}</div>` : ''}
+                            ${totalElements ? `<div style="font-size: 0.75rem; margin-top: 0.5rem; color: #888;">${totalElements} total elements</div>` : ''}
                         </div>
                         <div style="flex: 2; display: flex; flex-direction: column; gap: 0.5rem;">
                             <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -7234,7 +7154,7 @@
                         <div style="height:6px; background:#1a1a1a; border-radius:3px; overflow:hidden;">
                             <div style="height:100%; width:${score}%; background:${scoreColor}; border-radius:3px; transition:width 0.6s;"></div>
                         </div>
-                        <div style="font-size:0.75rem; color:#666; margin-top:0.3rem;">${score >= 90 ? 'Excellent' : score >= 70 ? 'Good — some issues' : 'Needs attention'}</div>
+                        <div style="font-size:0.75rem; color:#666; margin-top:0.3rem;">${checks.filter(c => c.pass).length} of ${checks.length} checks passed</div>
                     </div>
                 </div>
 
@@ -7753,7 +7673,7 @@
                             <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden;">
                                 <div style="height:100%; width:${score}%; background:${gradeColor}; border-radius:3px; transition:width 0.6s;"></div>
                             </div>
-                            <div style="font-size:0.68rem; color:#666; margin-top:3px;">${score >= 90 ? 'Excellent security posture' : score >= 75 ? 'Good — minor gaps' : score >= 60 ? 'Fair — several missing protections' : score >= 40 ? 'Weak — important protections missing' : 'Poor — needs immediate attention'}</div>
+                            <div style="font-size:0.68rem; color:#666; margin-top:3px;">${score}/100 — ${checks.filter(c => c.pass).length} of ${checks.length} checks passed</div>
                         </div>
                     </div>
 
@@ -7807,7 +7727,7 @@
                         <div style="font-size: 2rem; font-weight: 700; color: ${rwColor}; line-height: 1;">${rw.chars_per_line || '?'}</div>
                         <div>
                             <div style="font-size: 0.82rem; color: #ccc;">characters per line</div>
-                            <div style="font-size: 0.72rem; color: ${rwColor}; margin-top: 2px;">${rw.verdict === 'optimal' ? '✓ Optimal reading width (45-75 chars)' : rw.verdict === 'too wide' ? '⚠ Too wide — harder to track lines' : rw.verdict === 'too narrow' ? '⚠ Too narrow — choppy reading' : ''}</div>
+                            <div style="font-size: 0.72rem; color: ${rwColor}; margin-top: 2px;">${rw.verdict === 'optimal' ? 'Within 45-75 character range' : rw.verdict === 'too wide' ? 'Above 75 characters per line' : rw.verdict === 'too narrow' ? 'Below 45 characters per line' : ''}</div>
                         </div>
                     </div>
                     <div style="font-size: 0.68rem; color: #555; margin-top: 4px;">Container: ${rw.container_max_width || '?'}px max-width · ${rw.font_size || 16}px font</div>
@@ -8091,7 +8011,7 @@
                             <span style="font-size:0.72rem; color:${impColor};">●</span>
                             <span style="font-size:0.72rem; color:#999;">!important: <strong style="color:${impColor};">${impLabel}</strong></span>
                         </div>
-                        ${importantCount > 20 ? `<div style="font-size:0.68rem; color:#ff9f0a; margin-top:4px;">▸ Heavy !important use suggests specificity conflicts</div>` : ''}
+                        ${importantCount > 20 ? `<div style="font-size:0.68rem; color:#ff9f0a; margin-top:4px;">▸ ${importantCount} !important declarations found</div>` : ''}
                     </div>
                 </div>
             `;
@@ -8109,8 +8029,11 @@
             const totalSel = data.total_selectors || 0;
             const impCount = data.important_count || 0;
 
+            // Color by distribution — higher ID usage = more amber/red
             const healthColors = { Healthy: '#68d68d', Warning: '#ff9f0a', Chaotic: '#ff6b6b', Unknown: '#555' };
             const healthColor = healthColors[health] || '#555';
+            // Replace verdict labels with factual descriptions
+            const healthLabel = { Healthy: 'Low specificity', Warning: 'Mixed specificity', Chaotic: 'High specificity', Unknown: 'Unknown' }[health] || health;
 
             const methColors = { BEM: '#c9b8ff', 'Utility-first': '#7ec8e3', Module: '#f09dff', Semantic: '#68d68d', Mixed: '#ff9f0a', Unknown: '#555' };
             const methColor = methColors[methodology] || '#888';
@@ -8133,8 +8056,8 @@
                     <!-- Health + methodology hero -->
                     <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.7rem;">
                         <div style="flex-shrink:0; padding:0.4rem 0.8rem; border-radius:var(--radius-sm); border:2px solid ${healthColor}; background:rgba(255,255,255,0.02);">
-                            <div style="font-size:0.9rem; font-weight:800; color:${healthColor}; font-family:var(--font-display);">${health}</div>
-                            <div style="font-size:0.58rem; color:#666; margin-top:1px;">Cascade</div>
+                            <div style="font-size:0.9rem; font-weight:800; color:${healthColor}; font-family:var(--font-display);">${healthLabel}</div>
+                            <div style="font-size:0.58rem; color:#666; margin-top:1px;">${totalSel} selectors</div>
                         </div>
                         <div style="flex:1;">
                             <div style="font-size:0.78rem; color:#ccc; margin-bottom:2px;">${healthDetail}</div>
@@ -8843,7 +8766,7 @@
                             <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden;">
                                 <div style="height:100%; width:${score}%; background:${scoreColor}; border-radius:3px; transition:width 0.6s;"></div>
                             </div>
-                            <div style="font-size:0.72rem; color:#666; margin-top:3px;">${score >= 90 ? 'Excellent SEO fundamentals' : score >= 70 ? 'Good — minor gaps' : 'Needs attention'}</div>
+                            <div style="font-size:0.72rem; color:#666; margin-top:3px;">${checks.filter(c => c.pass).length} of ${checks.length} meta tags present</div>
                         </div>
                     </div>
 
@@ -9737,12 +9660,12 @@
             const totalP      = d.total_passes || 0;
             const score       = data.score ?? null;
 
-            // Translate score to human verdict
-            const verdict = score === null ? { label: 'Unknown', color: '#555', bg: 'rgba(85,85,85,0.08)', explain: 'Could not be measured' }
-                : score >= 95 ? { label: 'Excellent', color: '#34c759', bg: 'rgba(52,199,89,0.08)', explain: 'All text is easy to read against its background' }
-                : score >= 80 ? { label: 'Good', color: '#30d158', bg: 'rgba(48,209,88,0.08)', explain: 'Most text is clearly readable, minor issues' }
-                : score >= 60 ? { label: 'Needs Work', color: '#ff9f0a', bg: 'rgba(255,159,10,0.08)', explain: 'Some text may be hard to read, especially for people with low vision' }
-                : { label: 'Poor', color: '#ff453a', bg: 'rgba(255,69,58,0.08)', explain: 'Many elements have text that blends into the background' };
+            // Score-based color coding (no verdict labels — score speaks for itself)
+            const verdict = score === null ? { label: 'Not measured', color: '#555', bg: 'rgba(85,85,85,0.08)', explain: 'Contrast checker did not run' }
+                : score >= 95 ? { label: `${score}/100`, color: '#34c759', bg: 'rgba(52,199,89,0.08)', explain: `${totalP} of ${totalP + totalV} elements checked met contrast ratio ≥ 4.5:1` }
+                : score >= 80 ? { label: `${score}/100`, color: '#30d158', bg: 'rgba(48,209,88,0.08)', explain: `${totalV} of ${totalP + totalV} elements checked had contrast ratio below 4.5:1` }
+                : score >= 60 ? { label: `${score}/100`, color: '#ff9f0a', bg: 'rgba(255,159,10,0.08)', explain: `${totalV} of ${totalP + totalV} elements checked had contrast ratio below 4.5:1` }
+                : { label: `${score}/100`, color: '#ff453a', bg: 'rgba(255,69,58,0.08)', explain: `${totalV} of ${totalP + totalV} elements checked had contrast ratio below 4.5:1` };
 
             // Hero: big verdict
             const heroHTML = `
@@ -9819,7 +9742,7 @@
             const thresholdHTML = score !== null ? `
                 <div style="margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid rgba(255,255,255,0.04);">
                     <div style="display:flex; justify-content:space-between; font-size:0.6rem; color:#555; margin-bottom:4px;">
-                        <span>Poor</span><span>Needs work</span><span>Good</span><span>Excellent</span>
+                        <span>0</span><span>40</span><span>70</span><span>100</span>
                     </div>
                     <div style="position:relative; height:6px; background:linear-gradient(to right, #ff453a, #ff9f0a 40%, #ffd60a 60%, #34c759 85%, #34c759); border-radius:3px;">
                         <div style="position:absolute; top:-3px; left:${Math.min(score, 100)}%; transform:translateX(-50%); width:12px; height:12px; background:#fff; border-radius:50%; border:2px solid ${verdict.color}; box-shadow:0 0 6px ${verdict.color}44;"></div>
@@ -11347,56 +11270,7 @@
             if (e.key === 'Enter') analyzeURL();
         });
 
-        // ── Confidence Filter Toolbar ──────────────────────────────────────
-
-        const CONF_STORAGE_KEY = 'wi_conf_threshold';
-
-        function initConfidenceFilter() {
-            const slider = document.getElementById('confThresholdSlider');
-            const valueEl = document.getElementById('confThresholdValue');
-            if (!slider) return;
-
-            // Restore saved threshold
-            const saved = parseInt(localStorage.getItem(CONF_STORAGE_KEY) || '40', 10);
-            slider.value = saved;
-            valueEl.textContent = saved + '%';
-
-            slider.addEventListener('input', () => {
-                const v = parseInt(slider.value, 10);
-                valueEl.textContent = v + '%';
-                localStorage.setItem(CONF_STORAGE_KEY, v);
-                applyConfidenceFilter(v);
-            });
-        }
-
-        function showConfidenceFilter() {
-            const bar = document.getElementById('confidenceFilterBar');
-            if (bar) bar.classList.add('visible');
-            const saved = parseInt(localStorage.getItem(CONF_STORAGE_KEY) || '40', 10);
-            if (saved > 0) applyConfidenceFilter(saved);
-        }
-
-        function applyConfidenceFilter(threshold) {
-            const cards = document.querySelectorAll('#metricsGrid .metric-card, #metricsGrid [data-confidence]');
-            let hidden = 0;
-            cards.forEach(card => {
-                const conf = parseInt(card.dataset.confidence || '100', 10);
-                if (conf < threshold) {
-                    card.classList.add('conf-suppressed');
-                    hidden++;
-                } else {
-                    card.classList.remove('conf-suppressed');
-                }
-            });
-
-            // Update dimmed count indicator
-            const countEl = document.getElementById('confHiddenCount');
-            if (countEl) {
-                countEl.innerHTML = hidden > 0
-                    ? `<span style="font-size:var(--text-xs); color:var(--text-tertiary);">${hidden} dimmed</span>`
-                    : '';
-            }
-        }
+        // Confidence filter removed — values were not evidence-backed
 
         // ── Motion Track Interaction (hover/tap to play) ──────────────
         function initMotionTracks() {
@@ -11463,19 +11337,7 @@
             if (btn) btn.textContent = shouldExpand ? 'Collapse All' : 'Expand All';
         }
 
-        function resetConfidenceFilter() {
-            const slider = document.getElementById('confThresholdSlider');
-            const valueEl = document.getElementById('confThresholdValue');
-            if (!slider) return;
-            slider.value = 40;
-            valueEl.textContent = '40%';
-            localStorage.removeItem(CONF_STORAGE_KEY);
-            applyConfidenceFilter(40);
-            const grid = document.getElementById('metricsGrid');
-            if (grid) grid.classList.remove('show-all-metrics');
-        }
-
-        initConfidenceFilter();
+        // (confidence filter removed)
         loadWizardState();  // Restore wizard state if page was refreshed mid-session
 
         // Color Preview Modal Functions
