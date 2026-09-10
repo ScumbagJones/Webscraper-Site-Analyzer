@@ -6207,6 +6207,195 @@
         }
 
         // ═══════════════════════════════════════════════════════════
+        // Synthesis helpers — colour math + narrative generation
+        // ═══════════════════════════════════════════════════════════
+
+        function _hexToHsl(hex) {
+            hex = hex.replace(/^#/, '');
+            if (hex.length === 3) hex = hex.split('').map(c => c+c).join('');
+            const r = parseInt(hex.slice(0,2),16)/255;
+            const g = parseInt(hex.slice(2,4),16)/255;
+            const b = parseInt(hex.slice(4,6),16)/255;
+            const max = Math.max(r,g,b), min = Math.min(r,g,b);
+            let h = 0, s = 0, l = (max+min)/2;
+            if (max !== min) {
+                const d = max - min;
+                s = l > 0.5 ? d/(2-max-min) : d/(max+min);
+                switch(max) {
+                    case r: h = ((g-b)/d + (g<b?6:0))/6; break;
+                    case g: h = ((b-r)/d + 2)/6; break;
+                    case b: h = ((r-g)/d + 4)/6; break;
+                }
+            }
+            return { h: h*360, s: s*100, l: l*100 };
+        }
+
+        function _buildNarrative(evidence) {
+            const url = evidence._url || document.getElementById('urlInput').value || '';
+            const domain = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '') || 'This site';
+
+            const colors    = evidence.colors || {};
+            const typo      = evidence.typography || {};
+            const spatial   = evidence.spatial_composition || {};
+            const api       = evidence.api_patterns || {};
+            const content   = evidence.content_extraction || {};
+            const brand     = evidence.brand_personality || {};
+            const motion    = evidence.motion_tokens || {};
+
+            // ── Colour character ──────────────────────────────────────
+            const hexColors = (colors.palette?.primary || [])
+                .filter(c => c && typeof c === 'string' && c.startsWith('#'));
+            const hslValues = hexColors.map(_hexToHsl);
+            const avgL = hslValues.length ? hslValues.reduce((a,b) => a+b.l, 0)/hslValues.length : 50;
+            const avgH = hslValues.length ? hslValues.reduce((a,b) => a+b.h, 0)/hslValues.length : 200;
+            const colorCount = (colors.palette?.primary||[]).length + (colors.palette?.secondary||[]).length;
+
+            const lightness  = avgL < 35  ? 'dark'    : avgL > 72 ? 'light'   : 'mid-tone';
+            const warmth     = (avgH < 55 || avgH > 305) ? 'warm' : (avgH > 165 && avgH < 275) ? 'cool' : 'neutral';
+            const paletteSize = colorCount <= 3 ? 'restrained' : colorCount <= 7 ? 'focused' : 'expansive';
+            const paletteDesc = warmth === 'neutral'
+                ? `${lightness}, ${paletteSize} palette`
+                : `${lightness} ${warmth}-toned, ${paletteSize} palette`;
+
+            // ── Typography character ──────────────────────────────────
+            const fonts       = typo.details?.all_fonts || [];
+            const primaryFont = fonts.length > 0 ? fonts[0].split(',')[0].replace(/['"]/g, '').trim() : null;
+            const fontCount   = fonts.length;
+            const typeScale   = typo.type_scale || {};
+            const ratio       = typeof typeScale === 'object' ? typeScale.ratio : typeScale;
+            const typBase     = fontCount <= 1 ? 'single typeface' : fontCount === 2 ? 'paired typefaces' : 'layered type palette';
+            const scaleChar   = !ratio ? '' : ratio < 1.2 ? ' with a flat scale' : ratio >= 1.414 ? ' with dramatic size contrast' : '';
+            const typDesc     = primaryFont ? `${typBase} (${primaryFont})${scaleChar}` : `${typBase}${scaleChar}`;
+
+            // ── Layout / spatial ─────────────────────────────────────
+            const whitespace  = (spatial.whitespace_analysis?.interpretation || '').toLowerCase();
+            const patternType = (spatial.page_structure?.pattern_type || '').replace(/\s*\(.*\)/, '').toLowerCase();
+            const layoutDesc  = whitespace === 'spacious' ? 'generous breathing room'
+                              : whitespace === 'dense'    ? 'densely packed layout'
+                              : whitespace === 'minimal'  ? 'minimal, stripped-back layout'
+                              : 'balanced layout';
+
+            // ── Page type ─────────────────────────────────────────────
+            const pageType = content.page_type || '';
+            const ptLabels = {
+                'audioStream':    'live audio streaming platform',
+                'radioStation':   'live radio platform',
+                'podcastListing': 'podcast platform',
+                'showArchive':    'show archive',
+                'singleArticle':  'editorial publication',
+                'contentGrid':    'content platform',
+                'landingPage':    'marketing site',
+                'documentation':  'documentation hub',
+                'ecommerce':      'e-commerce store',
+            };
+            const siteLabel = ptLabels[pageType] || brand.audience_category || 'site';
+
+            // ── API / backend ─────────────────────────────────────────
+            const apiDet  = api.details || {};
+            const streams = apiDet.stream_endpoints || [];
+            const gql     = apiDet.graphql || [];
+            const rest    = apiDet.rest_apis || [];
+            const namedOps = [...new Set(gql.filter(g => g && g.operationName).map(g => g.operationName))];
+
+            // ── Assemble sentences ────────────────────────────────────
+            const parts = [];
+
+            // Sentence 1 — identity + visual fingerprint
+            const _an = w => /^[aeiou]/i.test(w) ? 'an' : 'a';
+            let s1 = `${domain} is ${_an(siteLabel)} ${siteLabel}`;
+            if (patternType && patternType !== 'unknown') s1 += ` with ${_an(patternType)} ${patternType} structure`;
+            s1 += '.';
+            parts.push(s1);
+
+            // Sentence 2 — visual character
+            const visParts = [paletteDesc, typDesc, layoutDesc].filter(Boolean);
+            if (visParts.length >= 2) {
+                const last = visParts.pop();
+                parts.push(`The visual identity centres on a ${visParts.join(', ')} and ${last}.`);
+            }
+
+            // Sentence 3 — technical specifics
+            const techParts = [];
+            if (streams.length > 0) {
+                const master = streams.find(s => s && s.hls_type === 'master');
+                techParts.push(master && master.stream_count
+                    ? `HLS audio (${master.stream_count} quality level${master.stream_count>1?'s':''}${master.max_kbps?', '+master.max_kbps+'kbps max':''})`
+                    : 'HLS audio streaming');
+            }
+            if (namedOps.length > 0) {
+                const opList = namedOps.slice(0,3).join(', ');
+                techParts.push(`${namedOps.length} GraphQL operation${namedOps.length>1?'s':''} (${opList}${namedOps.length>3?'…':''})`);
+            } else if (rest.length > 0) {
+                techParts.push(`${rest.length} REST endpoint${rest.length>1?'s':''}`);
+            }
+            const motionChoreography = motion?.choreography?.score || 0;
+            if (motionChoreography > 65) techParts.push('rich motion choreography');
+
+            if (techParts.length > 0) {
+                parts.push('The backend delivers ' + techParts.join(' alongside ') + '.');
+            }
+
+            return parts.join(' ');
+        }
+
+        function _buildPersonalityTags(evidence) {
+            const tags = [];
+            const content = evidence.content_extraction || {};
+            const api     = evidence.api_patterns || {};
+            const spatial = evidence.spatial_composition || {};
+            const motion  = evidence.motion_tokens || {};
+            const colors  = evidence.colors || {};
+
+            // Site type
+            const ptColors = {
+                'audioStream': '#f472b6', 'radioStation': '#f472b6', 'podcastListing': '#f472b6',
+                'documentation': '#4ade80', 'ecommerce': '#fb923c',
+                'singleArticle': '#a78bfa', 'contentGrid': '#94a3b8',
+                'landingPage': '#38bdf8', 'showArchive': '#f472b6',
+            };
+            const ptLabels = {
+                'audioStream': 'Audio-first', 'radioStation': 'Radio', 'podcastListing': 'Podcast',
+                'showArchive': 'Show Archive', 'documentation': 'Docs', 'ecommerce': 'Commerce',
+                'singleArticle': 'Editorial', 'contentGrid': 'Content Grid', 'landingPage': 'Marketing',
+            };
+            const pt = content.page_type || '';
+            if (ptLabels[pt]) tags.push({ label: ptLabels[pt], color: ptColors[pt] || 'var(--accent)' });
+
+            // Palette darkness
+            const hexColors = (colors.palette?.primary || []).filter(c => c?.startsWith?.('#'));
+            if (hexColors.length > 0) {
+                const hsl = _hexToHsl(hexColors[0]);
+                if (hsl.l < 35) tags.push({ label: 'Dark palette', color: '#475569' });
+                else if (hsl.l > 72) tags.push({ label: 'Light palette', color: '#94a3b8' });
+            }
+
+            // HLS
+            const streams = (api.details?.stream_endpoints || []);
+            if (streams.some(s => s && (s.type === 'hls' || s.hls_type))) {
+                tags.push({ label: 'HLS stream', color: '#f472b6' });
+            }
+
+            // GraphQL
+            const gql = api.details?.graphql || [];
+            if (gql.length > 0) tags.push({ label: 'GraphQL', color: '#c084fc' });
+
+            // REST
+            const rest = api.details?.rest_apis || [];
+            if (rest.length > 3) tags.push({ label: rest.length + ' REST endpoints', color: '#67e8f9' });
+
+            // Whitespace
+            const ws = spatial.whitespace_analysis?.interpretation || '';
+            if (ws === 'spacious') tags.push({ label: 'Spacious', color: '#6ee7b7' });
+            else if (ws === 'dense') tags.push({ label: 'Dense', color: '#fcd34d' });
+
+            // Motion
+            const mScore = motion?.choreography?.score || 0;
+            if (mScore > 65) tags.push({ label: 'Motion-rich', color: '#818cf8' });
+
+            return tags;
+        }
+
+        // ═══════════════════════════════════════════════════════════
         // Brand Overview Hero — the "at-a-glance" moment
         // ═══════════════════════════════════════════════════════════
         function buildBrandHero(evidence) {
@@ -6259,7 +6448,6 @@
 
             // Motion personality
             const motionPersonality = motion.motion_personality || '';
-            const designIntent = evidence.design_intent || '';
 
             // Avg confidence across all metrics
             const confidences = Object.values(evidence)
@@ -6271,7 +6459,7 @@
 
             // Build color strip
             const colorStripHTML = allColors.map(c => `
-                <div style="width:32px; height:32px; border-radius:var(--radius-sm); background:${c}; border:1px solid var(--border-default); flex-shrink:0;" title="${c}"></div>
+                <div style="width:28px; height:28px; border-radius:var(--radius-sm); background:${c}; border:1px solid var(--border-default); flex-shrink:0;" title="${c}"></div>
             `).join('');
 
             // Build tech stack badges
@@ -6292,14 +6480,56 @@
                     : `<div style="width:40px; height:40px; background:var(--surface-3); border-radius:var(--radius-md); display:flex; align-items:center; justify-content:center; border:1px solid var(--border-subtle); overflow:hidden;"><img src="${logo.url}" style="max-width:32px; max-height:32px;" alt="logo"></div>`;
             }
 
+            // ── Synthesis — narrative + personality tags ───────────────
+            const narrative = _buildNarrative(evidence);
+            const ptags     = _buildPersonalityTags(evidence);
+            const tagsHTML  = ptags.map(t =>
+                `<span style="display:inline-block; padding:3px 11px; background:${t.color}22; border:1px solid ${t.color}55; border-radius:var(--radius-full); font-size:0.68rem; font-weight:600; letter-spacing:0.04em; color:${t.color}; white-space:nowrap;">${t.label}</span>`
+            ).join('');
+
+            // ── Type specimen — load font + render live sample ────────
+            let typeSpecimenHTML = '';
+            if (primaryFont && primaryFont !== 'System Default') {
+                // Inject Google Fonts link (no-op if already loaded)
+                const fontSlug = primaryFont.replace(/\s+/g, '+');
+                const linkId   = 'gf-' + fontSlug;
+                if (!document.getElementById(linkId)) {
+                    const lnk = document.createElement('link');
+                    lnk.id   = linkId;
+                    lnk.rel  = 'stylesheet';
+                    lnk.href = `https://fonts.googleapis.com/css2?family=${fontSlug}:wght@400;600;700&display=swap`;
+                    document.head.appendChild(lnk);
+                }
+                typeSpecimenHTML = `
+                    <div style="margin-top:var(--space-5); padding:var(--space-5) var(--space-6); background:rgba(255,255,255,0.025); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+                        <div style="font-size:0.62rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-tertiary); margin-bottom:var(--space-4);">Type Specimen · ${primaryFont}</div>
+                        <div style="font-family:'${primaryFont}', system-ui, sans-serif; display:flex; flex-direction:column; gap:var(--space-2);">
+                            <div style="font-size:clamp(22px,4vw,36px); font-weight:700; color:var(--text-primary); line-height:1.1; letter-spacing:-0.02em;">The quick brown fox</div>
+                            <div style="font-size:var(--text-base); font-weight:400; color:var(--text-secondary); line-height:1.6;">jumps over the lazy dog — 0123456789</div>
+                            <div style="font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-tertiary);">ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                        </div>
+                    </div>`;
+            }
+
             container.innerHTML = `
                 <div class="brand-hero animate-in">
                     <div class="brand-hero-content">
                         <div class="brand-hero-title">Site Intelligence Report</div>
-                        <div style="display:flex; align-items:center; gap:var(--space-4); margin-bottom:var(--space-6);">
+                        <div style="display:flex; align-items:center; gap:var(--space-4); margin-bottom:var(--space-3);">
                             ${logoHTML}
                             <div class="brand-hero-url">${domain || 'Enter a URL above'}</div>
                         </div>
+
+                        <!-- Personality tags -->
+                        ${tagsHTML ? `<div style="display:flex; flex-wrap:wrap; gap:var(--space-2); margin-bottom:var(--space-5);">${tagsHTML}</div>` : ''}
+
+                        <!-- Plain-English narrative -->
+                        ${narrative ? `
+                            <div style="margin-bottom:var(--space-6); padding:var(--space-4) var(--space-5); background:linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01)); border-radius:var(--radius-md); border-left:3px solid var(--accent);">
+                                <div style="font-size:0.65rem; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--accent-text); margin-bottom:var(--space-2);">At a glance</div>
+                                <div style="font-size:var(--text-sm); color:var(--text-primary); line-height:1.7;">${narrative}</div>
+                            </div>
+                        ` : ''}
 
                         <!-- Quick stats row -->
                         <div class="brand-hero-grid">
@@ -6313,7 +6543,7 @@
                             </div>
                             <div class="brand-hero-stat">
                                 <div class="brand-hero-stat-label">Palette</div>
-                                <div style="display:flex; gap:4px; margin-top:var(--space-1);">
+                                <div style="display:flex; gap:4px; margin-top:var(--space-1); flex-wrap:wrap;">
                                     ${colorStripHTML || '<span style="color:var(--text-disabled); font-size:var(--text-sm);">No colors detected</span>'}
                                 </div>
                             </div>
@@ -6331,6 +6561,9 @@
                             </div>
                         </div>
 
+                        <!-- Type specimen -->
+                        ${typeSpecimenHTML}
+
                         ${stackParts.length > 0 ? `
                             <div style="margin-top:var(--space-5); display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap;">
                                 <span style="font-size:var(--text-xs); color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.06em;">Stack</span>
@@ -6341,13 +6574,6 @@
                         ${motionPersonality ? `
                             <div style="margin-top:var(--space-4); padding:var(--space-3) var(--space-4); background:rgba(255,255,255,0.03); border-radius:var(--radius-md); border-left:3px solid var(--accent);">
                                 <span style="font-size:var(--text-sm); color:var(--text-secondary); font-style:italic;">${motionPersonality}</span>
-                            </div>
-                        ` : ''}
-
-                        ${designIntent ? `
-                            <div style="margin-top:var(--space-4); padding:var(--space-4) var(--space-5); background:linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)); border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
-                                <div style="font-size:var(--text-xs); text-transform:uppercase; letter-spacing:0.08em; color:var(--text-tertiary); margin-bottom:var(--space-2);">Design Intent</div>
-                                <div style="font-size:var(--text-base); color:var(--text-primary); line-height:1.6;">${designIntent}</div>
                             </div>
                         ` : ''}
 
