@@ -56,6 +56,14 @@ WIZARD_MAX_PAGES = 5  # Max pages for "Scan All" diversity selection
 # TTL: entries older than 10 minutes are considered stale
 _evidence_cache = {}  # {url: {'evidence': {...}, 'timestamp': float}}
 _CACHE_TTL = 600  # 10 minutes
+_export_netviz = None
+
+def _get_export_netviz():
+    global _export_netviz
+    if _export_netviz is None:
+        from netviz_exporter import export_netviz
+        _export_netviz = export_netviz
+    return _export_netviz
 
 logger = logging.getLogger(__name__)
 
@@ -1935,6 +1943,82 @@ def export_design_md():
 
     markdown = generate_design_md(evidence)
     return jsonify({'success': True, 'markdown': markdown})
+
+
+@app.route('/api/scout-map', methods=['POST'])
+def scout_map():
+    """Return WaterCrawl classified page list for the API canvas visualization.
+
+    Body: {"site_url": "https://...", "limit": 20}
+    Returns: {"success": true, "pages": [{url, title, type, word_count}]}
+    """
+    data = request.json or {}
+    site_url = data.get('site_url', '').strip()
+    if not site_url:
+        return jsonify({'error': 'site_url required'}), 400
+
+    limit = min(int(data.get('limit', 20)), 50)
+
+    try:
+        from scout import get_crawl_map
+        pages = asyncio.run(get_crawl_map(site_url, limit=limit))
+        if pages is None:
+            return jsonify({'error': 'WATERCRAWL_API_KEY not configured — add it to .env'}), 400
+        return jsonify({'success': True, 'pages': pages, 'count': len(pages)})
+    except Exception as e:
+        logger.error(f'Scout map error: {e}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/export-netviz', methods=['POST'])
+def export_netviz_endpoint():
+    """Export evidence as a NetViz FlowSnapshotV2 JSON file.
+
+    Accepts any ONE of:
+      - {"evidence": {...}}           — inline evidence
+      - {"result_file": "/path.json"} — server-side path from /api/deep-scan
+      - {"site_url": "https://..."}   — reuses most-recent cached scan
+
+    Returns: {"success": true, "snapshot": {...}, "filename": "..."}
+    The snapshot JSON can be imported into NetViz via File → Import.
+    """
+    data = request.json or {}
+    evidence = data.get('evidence')
+    site_url = data.get('site_url', '')
+
+    if not evidence and data.get('result_file'):
+        fpath = data['result_file']
+        results_dir = os.path.realpath(os.path.expanduser('~/.webscraper/results'))
+        real_path = os.path.realpath(fpath)
+        if not real_path.startswith(results_dir + os.sep):
+            return jsonify({'error': 'result_file must live under ~/.webscraper/results'}), 400
+        try:
+            with open(real_path, 'r') as f:
+                payload = json.load(f)
+                evidence = payload.get('evidence')
+                if not site_url:
+                    site_url = payload.get('url', '')
+        except Exception as e:
+            return jsonify({'error': f'Could not read result_file: {str(e)[:120]}'}), 400
+
+    if not evidence and site_url:
+        cached = _evidence_cache.get(site_url)
+        if cached:
+            evidence = cached.get('evidence')
+
+    if not evidence:
+        return jsonify({'error': 'No evidence data provided (use evidence, result_file, or site_url)'}), 400
+
+    try:
+        export_netviz = _get_export_netviz()
+        snapshot = export_netviz(evidence, site_url)
+        from urllib.parse import urlparse as _up
+        host = _up(site_url).netloc.replace('.', '-') if site_url else 'site'
+        filename = f'{host}-netviz.json'
+        return jsonify({'success': True, 'snapshot': snapshot, 'filename': filename})
+    except Exception as e:
+        logger.error(f'NetViz export error: {e}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 
 def _resolve_design_evidence(evidence):

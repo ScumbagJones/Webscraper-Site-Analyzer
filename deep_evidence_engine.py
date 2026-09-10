@@ -717,47 +717,47 @@ class DeepEvidenceEngine:
 
     async def _smart_nav_sample(self, page, base_url: str) -> Dict[str, str]:
         """
-        Diversity-based 3-point sampling via navigation.
+        Diversity-based page sampling: WaterCrawl + Playwright nav + template clusters
+        run in parallel, then merge into a unified priority-ordered candidate pool.
 
-        Discovers nav links (with optional lightweight interactive discovery),
-        then selects the 3 most diverse pages by URL path structure.
-
-        When Cloudflare is available and discovery_method permits, uses crawl
-        data for a richer URL pool before falling through to nav discovery.
+        WaterCrawl (semantic classification) runs as a background asyncio task while
+        Playwright discovers nav links, clicks dropdowns, and extracts URL-pattern
+        clusters — all concurrently.  The three pools are merged with WaterCrawl's
+        typed pages (schedule/shows/docs/blog) taking priority slots, template
+        clusters filling structural depth, and nav links covering the rest.
 
         Returns:
-            {
-                'home': 'https://site.com',
-                'nav_1': 'https://site.com/products',
-                'nav_2': 'https://site.com/docs'
-            }
+            {'home': 'https://site.com', 'nav_1': '...', 'nav_2': '...', ...}
         """
-        # ── Phase 0: WaterCrawl scout (when API key is configured) ──────────────
-        # Crawls ~12 pages cheaply, classifies by structural type (docs/blog/
-        # product/ecommerce/…), then picks one representative per type. Gives
-        # Smart Nav a diversity-optimised candidate pool before we spend
-        # Patchright time on anything. Falls back silently if key is absent.
-        try:
-            from scout import smart_nav_urls
-            scout_urls = await smart_nav_urls(base_url, limit=12, max_pages=4)
-            if scout_urls and len(scout_urls) >= 2:
-                result = {'home': base_url}
-                for url in scout_urls:
-                    if url.rstrip('/') == base_url.rstrip('/'):
-                        continue
-                    result[f'nav_{len(result)}'] = url
-                    if len(result) >= 5:  # home + 4 nav pages max
-                        break
-                return result
-        except Exception as e:
-            print(f'   ⚠️  WaterCrawl scout failed: {e}')
+        # WaterCrawl semantic types that should claim a slot before path-diversity
+        # selection runs — these are pages users explicitly want to understand.
+        _PRIORITY_TYPES = ['schedule', 'shows', 'discover', 'archive', 'docs', 'blog']
 
-        # ── Try Cloudflare discovery first (if configured) ──
+        # ── Phase 0: Launch WaterCrawl in background immediately ─────────────
+        # Pure HTTP calls — no browser needed. Starts while Playwright does its work.
+        wc_task = None
+        try:
+            from scout import smart_nav_candidates
+            wc_task = asyncio.create_task(smart_nav_candidates(base_url, limit=12))
+        except Exception:
+            pass  # WaterCrawl not configured — continue without it
+
+        # ── Phase 1: Cloudflare discovery (if configured) ────────────────────
         if self.discovery_method in ('cloudflare', 'auto'):
             cf_urls = await self._discover_via_cloudflare(base_url, limit=50)
             if cf_urls and len(cf_urls) > 5:
                 print(f"   ☁️  Cloudflare discovered {len(cf_urls)} URLs")
-                selected = self._select_diverse_pages(cf_urls, base_url, max_pages=3)
+                self._cloudflare_urls = cf_urls
+                # Still run WaterCrawl merge if available
+                wc_candidates = []
+                if wc_task:
+                    try:
+                        wc_candidates = await asyncio.wait_for(wc_task, timeout=100) or []
+                    except Exception:
+                        wc_candidates = []
+                wc_urls = [c['url'] for c in wc_candidates]
+                all_urls = wc_urls + [u for u in cf_urls if u not in wc_urls]
+                selected = self._select_diverse_pages(all_urls, base_url, max_pages=3)
                 result = {'home': base_url}
                 for key, url in selected.items():
                     if key == 'home':
@@ -766,17 +766,13 @@ class DeepEvidenceEngine:
                 for label, url in result.items():
                     if label != 'home':
                         print(f"   📍 {label}: {url}")
-                # Store crawled URLs for topology analysis later
-                self._cloudflare_urls = cf_urls
                 return result
 
+        # ── Phase 2: Playwright nav link discovery ───────────────────────────
         print("   🧭 Discovering navigation structure...")
-
-        # Load home page
         await page.goto(base_url, wait_until='domcontentloaded', timeout=30000)
         await asyncio.sleep(2)
 
-        # Discover visible nav links
         nav_links = await self._discover_nav_links(page, base_url)
 
         # Lightweight interactive pass: click up to 5 nav triggers to augment pool
@@ -798,7 +794,6 @@ class DeepEvidenceEngine:
                     }).filter(Boolean);
                 }
             """)
-
             if quick_triggers:
                 print(f"   🔍 Quick interactive pass: {len(quick_triggers)} triggers")
                 for sel in quick_triggers[:5]:
@@ -820,24 +815,14 @@ class DeepEvidenceEngine:
                     except Exception:
                         pass
         except Exception:
-            pass  # Non-fatal — proceed with static nav links
+            pass
 
-        if not nav_links:
-            print("   ⚠️  No nav links found, using home page only")
-            return {'home': base_url}
-
-        # ── Template-aware page selection ────────────────────────────────────
-        # Nav links only reach top-level listing pages (/latest, /explore).
-        # Content templates (/shows/:slug/episodes/:slug2) are deeper and won't
-        # appear in the nav bar — but they represent the majority of pages on
-        # content sites. Pull one representative URL from each URL pattern cluster
-        # and merge into the candidate pool so Smart Nav reaches content templates.
+        # ── Phase 3: Template cluster discovery ──────────────────────────────
         template_candidates: List[str] = []
-        template_labels: dict = {}  # url → human label for logging
+        template_labels: dict = {}
         try:
             full_links = await self._discover_links(page, base_url)
             clusters = full_links.get('url_pattern_clusters', [])
-            # Rank clusters: deeper path + more examples → higher priority
             clusters_sorted = sorted(
                 clusters,
                 key=lambda c: c.get('depth', 1) * 2 + min(c.get('count', 1), 20),
@@ -851,39 +836,80 @@ class DeepEvidenceEngine:
                 if not path.startswith('/'):
                     continue
                 candidate_url = base_url.rstrip('/') + path
-                # Skip if it's basically the homepage
                 if candidate_url.rstrip('/') == base_url.rstrip('/'):
                     continue
                 template_candidates.append(candidate_url)
-                depth = cluster.get('depth', 1)
-                count = cluster.get('count', '?')
-                tmpl  = cluster.get('template', path)
-                template_labels[candidate_url] = f"template {tmpl!r} ({count} pages)"
+                template_labels[candidate_url] = (
+                    f"template {cluster.get('template', path)!r} "
+                    f"({cluster.get('count', '?')} pages)"
+                )
         except Exception:
-            pass  # Non-fatal — fall back to nav links only
+            pass
 
         if template_candidates:
             print(f"   🗂️  {len(template_candidates)} content templates discovered:")
             for url in template_candidates:
                 print(f"      ▸ {template_labels.get(url, url)}")
 
-        # Merge: template representatives first (they're deeper and more interesting),
-        # then nav links as fallback options. _select_diverse_pages deduplicates.
-        combined_pool = template_candidates + [u for u in nav_links if u not in template_candidates]
+        # ── Phase 4: Await WaterCrawl result (likely done by now) ────────────
+        wc_candidates: List[Dict] = []
+        if wc_task:
+            try:
+                wc_candidates = await asyncio.wait_for(wc_task, timeout=100) or []
+            except asyncio.TimeoutError:
+                print("   ⚠️  WaterCrawl timed out — proceeding without it")
+            except Exception as e:
+                print(f"   ⚠️  WaterCrawl failed: {e}")
 
-        selected = self._select_diverse_pages(combined_pool, base_url, max_pages=3)
+        # ── Phase 5: Merge pools with priority ordering ───────────────────────
+        # Priority 1 — WaterCrawl typed pages: one slot per high-value semantic type.
+        #   These are pages users care about (schedule, shows, docs) that don't
+        #   always appear in the top nav bar.
+        # Priority 2 — Template cluster representatives: deep content pages.
+        # Priority 3 — Nav links + dropdown discoveries: top-level nav items.
+        candidate_labels: dict = dict(template_labels)  # track all labels for logging
 
-        # Rename keys to nav_1/nav_2 for backward compatibility
+        priority_urls: List[str] = []
+        if wc_candidates:
+            # Index WaterCrawl results by type for O(1) lookup
+            by_type: Dict[str, List[str]] = {}
+            for c in wc_candidates:
+                by_type.setdefault(c['type'], []).append(c['url'])
+
+            seen_priority = set()
+            for ptype in _PRIORITY_TYPES:
+                for url in by_type.get(ptype, []):
+                    if url.rstrip('/') == base_url.rstrip('/'):
+                        continue
+                    if url not in seen_priority:
+                        priority_urls.append(url)
+                        seen_priority.add(url)
+                        candidate_labels[url] = f"watercrawl:{ptype}"
+                        break  # one slot per type
+
+        # Build final ordered pool: priority → template clusters → nav links
+        seen_pool: set = set()
+        ordered_pool: List[str] = []
+        for url in priority_urls + template_candidates + nav_links:
+            if url not in seen_pool and url.rstrip('/') != base_url.rstrip('/'):
+                ordered_pool.append(url)
+                seen_pool.add(url)
+
+        if not ordered_pool:
+            print("   ⚠️  No candidate pages found, using home page only")
+            return {'home': base_url}
+
+        selected = self._select_diverse_pages(ordered_pool, base_url, max_pages=4)
+
         result = {'home': base_url}
         for key, url in selected.items():
             if key == 'home':
                 continue
-            idx = len(result)
-            result[f'nav_{idx}'] = url
+            result[f'nav_{len(result)}'] = url
 
         for label, url in result.items():
             if label != 'home':
-                suffix = f" [{template_labels[url]}]" if url in template_labels else ""
+                suffix = f" [{candidate_labels[url]}]" if url in candidate_labels else ""
                 print(f"   📍 {label}: {url}{suffix}")
 
         return result
@@ -2120,7 +2146,253 @@ class DeepEvidenceEngine:
             },
         })
 
+        # Apply cross-page confidence boosting before returning
+        if n >= 2:
+            freq_maps = self._compute_token_frequencies(valid)
+            evidence = self._apply_cross_page_boost(evidence, freq_maps, n)
+
         return evidence
+
+    # ── Cross-page confidence boosting ────────────────────────────────────────
+
+    @staticmethod
+    def _compute_token_frequencies(valid_pages: Dict) -> Dict:
+        """
+        Build per-category token → page_count maps from N pages of evidence.
+        Used by _apply_cross_page_boost to compute how site-wide each token is.
+
+        Fix #1: color identity
+        - Normalizes oklch float precision before string comparison so
+          "oklch(0.9727 0.01190 17.36)" and "oklch(0.9727 0.0119 17.36)"
+          count as the same token.
+        - Separately counts color CSS variable *names* (--color-*, --brand-*,
+          etc.) as a more semantic signal than computed value strings.
+        """
+        import re
+        from collections import Counter
+        color_freq:     Counter = Counter()
+        color_var_freq: Counter = Counter()  # CSS var names for color vars
+        font_freq:      Counter = Counter()
+        spacing_freq:   Counter = Counter()
+        shadow_freq:    Counter = Counter()
+        cssvar_freq:    Counter = Counter()
+
+        _COLOR_VAR_RE = re.compile(
+            r'(color|colour|bg|background|text|fill|stroke|border|accent|'
+            r'brand|primary|secondary|surface|palette|theme|fg|on-)',
+            re.I,
+        )
+
+        def _normalize_color(s: str) -> str:
+            """Round oklch/lab floats to 3dp so minor precision differences don't split keys."""
+            if 'oklch' in s or 'oklab' in s or s.startswith('lab(') or s.startswith('lch('):
+                return re.sub(r'(\d+\.\d{4,})', lambda m: f'{float(m.group(1)):.3f}', s)
+            return s.lower().strip()
+
+        for ev in valid_pages.values():
+            # Colors — collect all hex/rgb/oklch values from palette buckets
+            palette = (ev.get('colors') or {}).get('palette') or {}
+            page_colors: set = set()
+            if isinstance(palette, dict):
+                for bucket in palette.values():
+                    if isinstance(bucket, list):
+                        for c in bucket:
+                            h = (c.get('hex', c) if isinstance(c, dict) else c)
+                            if h and isinstance(h, str):
+                                page_colors.add(_normalize_color(h))
+            elif isinstance(palette, list):
+                for c in palette:
+                    h = (c.get('hex', c) if isinstance(c, dict) else c)
+                    if h and isinstance(h, str):
+                        page_colors.add(_normalize_color(h))
+            color_freq.update(page_colors)
+
+            # CSS custom properties — semantic color var names as primary color signal
+            css_an = ev.get('css_analytics') or {}
+            cp = css_an.get('custom_properties') or {}
+            if isinstance(cp, dict):
+                page_color_vars = set(
+                    k for k in cp.keys()
+                    if isinstance(k, str) and _COLOR_VAR_RE.search(k)
+                )
+                color_var_freq.update(page_color_vars)
+                cssvar_freq.update(cp.keys())
+
+            # Fonts
+            typo = ev.get('typography') or {}
+            page_fonts = set(str(f) for f in (typo.get('fonts') or typo.get('font_families') or []) if f)
+            font_freq.update(page_fonts)
+
+            # Spacing values
+            spacing = ev.get('spacing_scale') or {}
+            page_spacing = set(str(v) for v in (spacing.get('scale') or spacing.get('values') or []) if v)
+            spacing_freq.update(page_spacing)
+
+            # Shadow levels
+            shadow = ev.get('shadow_system') or {}
+            for s in (shadow.get('levels') or []):
+                key = s.get('value') or s.get('css') or str(s)
+                if key:
+                    shadow_freq[str(key)[:60]] += 1
+
+        return {
+            'colors':      color_freq,
+            'color_vars':  color_var_freq,   # CSS var names (semantic, format-agnostic)
+            'fonts':       font_freq,
+            'spacing':     spacing_freq,
+            'shadows':     shadow_freq,
+            'css_vars':    cssvar_freq,
+        }
+
+    @staticmethod
+    def _apply_cross_page_boost(evidence: Dict, freq_maps: Dict, n: int) -> Dict:
+        """
+        Boost (or attenuate) confidence scores of evidence keys based on how
+        consistently their tokens appear across n sampled pages.
+
+        Multiplier = 0.70 + 0.60 * avg_frequency_ratio
+          - All tokens on all pages (ratio 1.0) → ×1.30
+          - Tokens on half the pages (ratio 0.5) → ×1.00 (neutral)
+          - Tokens on one page only (ratio 1/n)  → attenuated toward 0.70
+        Confidence is capped at 95 and floored at 0.
+
+        Fix #3: confidence_before_boost is stored alongside the new value.
+        Fix #4: boost_multiplier is stored so callers can audit the math.
+        Fix #2: cross_page fields use 'sampled_wide_*' names + sample_note.
+        Fix #1: color_vars (CSS variable names) used as primary color signal
+                when available; computed-string freq used as fallback.
+        """
+        def _avg_ratio(freq, top_k: int = 12) -> float:
+            if not freq:
+                return 0.5
+            top = freq.most_common(top_k)
+            if not top:
+                return 0.5
+            return sum(c / n for _, c in top) / len(top)
+
+        def _multiplier(ratio: float) -> float:
+            return round(0.70 + 0.60 * ratio, 3)
+
+        def _boost(conf: int, ratio: float) -> int:
+            return min(95, max(0, round(conf * _multiplier(ratio))))
+
+        _sample_note = (
+            f"Based on {n} sampled pages. Tokens labeled 'sampled_wide' "
+            f"appeared on all {n} sampled pages but may not represent the full site."
+        )
+
+        result = dict(evidence)
+
+        # Colors — prefer CSS variable name frequency (semantic, format-agnostic)
+        # over computed color string frequency (breaks on oklch precision drift).
+        if isinstance(result.get('colors'), dict):
+            color_var_freq = freq_maps.get('color_vars') or {}
+            color_str_freq = freq_maps.get('colors') or {}
+            primary_freq   = color_var_freq if color_var_freq else color_str_freq
+            using_vars     = bool(color_var_freq)
+
+            ratio  = _avg_ratio(primary_freq, top_k=15)
+            mult   = _multiplier(ratio)
+            old    = result['colors'].get('confidence', 60)
+            sampled_wide = [t for t, c in primary_freq.items() if c == n][:12]
+            page_only    = [t for t, c in primary_freq.items() if c == 1][:5]
+            result['colors'] = {
+                **result['colors'],
+                'confidence':            _boost(old, ratio),
+                'confidence_before_boost': old,
+                'cross_page': {
+                    'sample_pages':          n,
+                    'sample_note':           _sample_note,
+                    'avg_token_frequency':   round(ratio, 2),
+                    'boost_multiplier':      mult,
+                    'token_signal':          'css_var_names' if using_vars else 'computed_strings',
+                    'sampled_wide_colors':   sampled_wide,
+                    'page_only_colors':      page_only,
+                    'unique_tokens_seen':    len(primary_freq),
+                },
+            }
+
+        # Typography
+        if isinstance(result.get('typography'), dict):
+            ratio = _avg_ratio(freq_maps['fonts'], top_k=5)
+            mult  = _multiplier(ratio)
+            old   = result['typography'].get('confidence', 70)
+            result['typography'] = {
+                **result['typography'],
+                'confidence':            _boost(old, ratio),
+                'confidence_before_boost': old,
+                'cross_page': {
+                    'sample_pages':        n,
+                    'sample_note':         _sample_note,
+                    'avg_token_frequency': round(ratio, 2),
+                    'boost_multiplier':    mult,
+                    'sampled_wide_fonts':  [f for f, c in freq_maps['fonts'].items() if c == n],
+                    'page_only_fonts':     [f for f, c in freq_maps['fonts'].items() if c == 1],
+                },
+            }
+
+        # Spacing
+        if isinstance(result.get('spacing_scale'), dict):
+            ratio = _avg_ratio(freq_maps['spacing'], top_k=10)
+            mult  = _multiplier(ratio)
+            old   = result['spacing_scale'].get('confidence', 70)
+            result['spacing_scale'] = {
+                **result['spacing_scale'],
+                'confidence':            _boost(old, ratio),
+                'confidence_before_boost': old,
+                'cross_page': {
+                    'sample_pages':        n,
+                    'sample_note':         _sample_note,
+                    'avg_token_frequency': round(ratio, 2),
+                    'boost_multiplier':    mult,
+                    'sampled_wide_values': [v for v, c in freq_maps['spacing'].items() if c == n][:10],
+                },
+            }
+
+        # Shadow system
+        if isinstance(result.get('shadow_system'), dict):
+            ratio = _avg_ratio(freq_maps['shadows'], top_k=5)
+            mult  = _multiplier(ratio)
+            old   = result['shadow_system'].get('confidence', 60)
+            result['shadow_system'] = {
+                **result['shadow_system'],
+                'confidence':            _boost(old, ratio),
+                'confidence_before_boost': old,
+                'cross_page': {
+                    'sample_pages':        n,
+                    'sample_note':         _sample_note,
+                    'avg_token_frequency': round(ratio, 2),
+                    'boost_multiplier':    mult,
+                },
+            }
+
+        # Attach frequency summary to design_system if present
+        if isinstance(result.get('design_system'), dict):
+            color_var_freq = freq_maps.get('color_vars') or {}
+            color_str_freq = freq_maps.get('colors') or {}
+            primary_color  = color_var_freq if color_var_freq else color_str_freq
+            result['design_system'] = {
+                **result['design_system'],
+                'cross_page_frequencies': {
+                    'color_signal':  'css_var_names' if color_var_freq else 'computed_strings',
+                    'colors': {
+                        'sampled_wide': [h for h, c in primary_color.items() if c == n][:12],
+                        'page_only':    [h for h, c in primary_color.items() if c == 1][:5],
+                        'avg_frequency': round(_avg_ratio(primary_color, 15), 2),
+                    },
+                    'fonts': {
+                        'sampled_wide': [f for f, c in freq_maps['fonts'].items() if c == n],
+                        'page_only':    [f for f, c in freq_maps['fonts'].items() if c == 1],
+                        'avg_frequency': round(_avg_ratio(freq_maps['fonts'], 5), 2),
+                    },
+                    'spacing': {
+                        'sampled_wide': [v for v, c in freq_maps['spacing'].items() if c == n][:10],
+                        'avg_frequency': round(_avg_ratio(freq_maps['spacing'], 10), 2),
+                    },
+                },
+            }
+
+        return result
 
     def _synthesize_multi_page(self, page_results: Dict[str, Dict], mode: str = 'smart-nav') -> Dict:
         """
@@ -2319,7 +2591,10 @@ class DeepEvidenceEngine:
             url_pats = result.get('url_patterns', {})
             details = url_pats.get('details', {}) if isinstance(url_pats, dict) else {}
             all_links = details.get('all', []) if isinstance(details, dict) else []
-            all_cross_urls.update(all_links)
+            for item in all_links:
+                url_str = item.get('url', '') if isinstance(item, dict) else str(item)
+                if url_str:
+                    all_cross_urls.add(url_str)
             meta_url = (result.get('meta_info') or {}).get('url', '')
             if meta_url:
                 all_cross_urls.add(meta_url)
@@ -2353,6 +2628,48 @@ class DeepEvidenceEngine:
             synthesis['site_content_profile'] = self._classify_cloudflare_pages(
                 self._cloudflare_pages, base_url
             )
+
+        # Cross-page confidence boosting — boost token confidence scores based on
+        # how consistently each token appears across all scanned pages.
+        valid_for_boost = {k: v for k, v in page_results.items() if not v.get('error')}
+        n_valid = len(valid_for_boost)
+        if n_valid >= 2:
+            freq_maps = self._compute_token_frequencies(valid_for_boost)
+            # Use CSS var names as primary color signal when available (fix #1).
+            color_var_freq = freq_maps.get('color_vars') or {}
+            color_str_freq = freq_maps.get('colors') or {}
+            primary_color  = color_var_freq if color_var_freq else color_str_freq
+            sample_note = (
+                f"Based on {n_valid} sampled pages. 'sampled_wide' means the "
+                f"token appeared on all {n_valid} sampled pages."
+            )
+            synthesis['cross_page_token_frequencies'] = {
+                'sample_pages':  n_valid,
+                'sample_note':   sample_note,
+                'color_signal':  'css_var_names' if color_var_freq else 'computed_strings',
+                'colors': {
+                    'sampled_wide':  [h for h, c in primary_color.items() if c == n_valid][:12],
+                    'page_only':     [h for h, c in primary_color.items() if c == 1][:5],
+                    'unique_tokens': len(primary_color),
+                },
+                'fonts': {
+                    'sampled_wide': [f for f, c in freq_maps['fonts'].items() if c == n_valid],
+                    'page_only':    [f for f, c in freq_maps['fonts'].items() if c == 1],
+                },
+                'spacing': {
+                    'sampled_wide':  [v for v, c in freq_maps['spacing'].items() if c == n_valid][:10],
+                    'unique_tokens': len(freq_maps['spacing']),
+                },
+            }
+            # Boost confidence in each page's evidence so per-page cards reflect
+            # cross-page signal (fix #3: before/after baseline stored per metric).
+            boosted_results = {}
+            for label, ev in page_results.items():
+                if ev.get('error'):
+                    boosted_results[label] = ev
+                else:
+                    boosted_results[label] = self._apply_cross_page_boost(ev, freq_maps, n_valid)
+            synthesis['page_results'] = boosted_results
 
         return synthesis
 
@@ -2990,12 +3307,22 @@ class DeepEvidenceEngine:
 
             # Network monitoring
             self.network_requests = []
-            page.on('request', lambda req: self.network_requests.append({
-                'url': req.url,
-                'method': req.method,
-                'resource_type': req.resource_type,
-                'headers': dict(req.headers)
-            }))
+            def _on_request(req):
+                entry = {
+                    'url': req.url,
+                    'method': req.method,
+                    'resource_type': req.resource_type,
+                    'headers': dict(req.headers),
+                }
+                # Capture POST body for API requests — lets us extract GraphQL
+                # operationName so "6× /graphql" becomes ["getSchedule", "getShows", ...]
+                if req.method == 'POST':
+                    try:
+                        entry['post_data'] = req.post_data
+                    except Exception:
+                        pass
+                self.network_requests.append(entry)
+            page.on('request', _on_request)
 
             self.network_responses = []
             page.on('response', lambda resp: self.network_responses.append({
@@ -3373,6 +3700,11 @@ class DeepEvidenceEngine:
             # redirect before committing to a full scan.
             preflight = await self._preflight_page_quality(page, self.url)
             self._preflight = preflight  # stash for evidence injection below
+
+            # Trigger any media player so HLS/stream requests fire before extractors run.
+            # The page.on('request') listener stays live so the manifest URLs append to
+            # self.network_requests automatically; _analyze_api_patterns() picks them up.
+            await self._trigger_media_player(page)
 
             # MODE BRANCHING
             if self.analysis_mode == 'single':
@@ -4703,12 +5035,45 @@ class DeepEvidenceEngine:
         api_requests = [r for r in self.network_requests
                         if r.get('resource_type') in ['xhr', 'fetch', 'websocket']]
 
+        # Media requests (HLS manifests, audio/video segments)
+        media_requests = [r for r in self.network_requests
+                          if r.get('resource_type') == 'media']
+
         patterns = {
             'rest_apis': [],
             'graphql': [],
             'websockets': [],
+            'stream_endpoints': [],
             'total_api_calls': len(api_requests)
         }
+
+        # HLS / DASH / stream manifest detection from all network traffic
+        _seen_manifests = set()
+        _seen_ts_base = set()
+        for req in list(api_requests) + list(media_requests):
+            url = req.get('url', '')
+            if not url:
+                continue
+            # m3u8 manifests → stream_endpoints (deduplicated; skip .ts segment chunks)
+            if '.m3u8' in url:
+                # Normalise: strip query params for dedup key
+                base = url.split('?')[0]
+                if base not in _seen_manifests:
+                    _seen_manifests.add(base)
+                    patterns['stream_endpoints'].append(url)
+            elif '.mpd' in url:  # DASH manifest
+                base = url.split('?')[0]
+                if base not in _seen_manifests:
+                    _seen_manifests.add(base)
+                    patterns['stream_endpoints'].append(url)
+            elif '.ts' in url and 'hls' in url.lower():
+                # HLS transport-stream segment — deduplicate by dropping timestamp suffix
+                import re as _re
+                seg_base = _re.sub(r'[\d_-]+\.ts.*$', '', url)
+                if seg_base not in _seen_ts_base:
+                    _seen_ts_base.add(seg_base)
+                    # Represent the whole chunk stream with one example URL
+                    patterns['stream_endpoints'].append(url + '  [HLS segment]')
 
         # Also add any CDP-captured WebSocket connections
         ws_urls = set()
@@ -4725,11 +5090,33 @@ class DeepEvidenceEngine:
             if req.get('resource_type') == 'websocket':
                 patterns['websockets'].append(url)
             elif 'graphql' in url.lower():
-                patterns['graphql'].append(url)
+                # Try to extract operationName from POST body so we surface
+                # meaningful query names instead of repeating the endpoint URL
+                op_name = None
+                post_data = req.get('post_data')
+                if post_data:
+                    try:
+                        import json as _json
+                        body = _json.loads(post_data)
+                        op_name = body.get('operationName') or None
+                        if not op_name:
+                            # Inline query — extract the first word after "query" or "mutation"
+                            import re as _re
+                            raw_q = body.get('query', '')
+                            m = _re.search(r'\b(?:query|mutation|subscription)\s+(\w+)', raw_q)
+                            op_name = m.group(1) if m else None
+                    except Exception:
+                        pass
+                patterns['graphql'].append({'url': url, 'operationName': op_name})
             elif 'ws://' in url or 'wss://' in url:
                 patterns['websockets'].append(url)
+            elif '.m3u8' in url or '.mpd' in url:
+                pass  # Already handled in stream_endpoints above
             else:
                 patterns['rest_apis'].append(url)
+
+        if patterns['stream_endpoints']:
+            print(f"      🎙️  Stream endpoints detected: {len(patterns['stream_endpoints'])} manifest(s)")
 
         # Generate API relationship map
         relationship_map = None
@@ -4745,7 +5132,7 @@ class DeepEvidenceEngine:
             'confidence': min(90, 40 + len((relationship_map or {}).get('endpoints', [])) * 5),
             'details': patterns,
             'code_snippets': self._generate_api_snippets(patterns),
-            'relationship_map': relationship_map  # NEW: API relationships
+            'relationship_map': relationship_map
         }
 
     async def _extract_site_architecture(self, page):
@@ -6058,14 +6445,23 @@ class DeepEvidenceEngine:
         return score
 
     def _determine_api_pattern(self, patterns):
-        if len(patterns['graphql']) > 0:
-            return f"GraphQL API ({len(patterns['graphql'])} queries)"
-        elif len(patterns['rest_apis']) > 5:
-            return f"REST API ({len(patterns['rest_apis'])} endpoints)"
-        elif len(patterns['websockets']) > 0:
-            return "WebSocket Real-time"
-        else:
-            return "Static Content"
+        parts = []
+        if len(patterns.get('stream_endpoints', [])) > 0:
+            parts.append(f"HLS/Stream ({len(patterns['stream_endpoints'])} manifest(s))")
+        gql = patterns.get('graphql', [])
+        if gql:
+            # Collect unique named operations
+            named = sorted({e['operationName'] for e in gql
+                            if isinstance(e, dict) and e.get('operationName')})
+            if named:
+                parts.append(f"GraphQL ({', '.join(named[:4])}{'...' if len(named) > 4 else ''})")
+            else:
+                parts.append(f"GraphQL ({len(gql)} queries)")
+        if len(patterns.get('rest_apis', [])) > 0:
+            parts.append(f"REST ({len(patterns['rest_apis'])} endpoints)")
+        if len(patterns.get('websockets', [])) > 0:
+            parts.append("WebSocket Real-time")
+        return ' + '.join(parts) if parts else "Static Content"
 
     def _calculate_article_confidence(self, articles):
         if not articles:
@@ -6834,6 +7230,47 @@ class DeepEvidenceEngine:
             pass
 
         return results
+
+    # ── Media player trigger ──────────────────────────────────────────────────
+
+    async def _trigger_media_player(self, page) -> bool:
+        """Click a play button if present so HLS/stream network requests fire.
+
+        Radio and streaming sites gate their audio URLs behind a play click —
+        the HLS manifest (.m3u8) and GraphQL calls only appear in network
+        traffic after the user presses play.  This method clicks the first
+        matching play-button selector and waits briefly for the requests to
+        propagate into self.network_requests (which uses a live listener).
+
+        Returns True if a play button was found and clicked.
+        """
+        PLAY_SELECTORS = [
+            "button[aria-label*='play live' i]",
+            "button[aria-label*='play stream' i]",
+            "button[aria-label*='listen live' i]",
+            "button[aria-label*='listen' i]",
+            "button[aria-label*='play' i]",
+            "[role='button'][aria-label*='play' i]",
+            ".play-button",
+            ".btn-play",
+            "[class*='play'][class*='btn']",
+            "[class*='btn'][class*='play']",
+            "button.player-play",
+            "#play-button",
+        ]
+        import asyncio
+        for selector in PLAY_SELECTORS:
+            try:
+                el = await page.query_selector(selector)
+                if el and await el.is_visible():
+                    print(f"   🎙️  Clicking media play button: {selector!r}")
+                    await el.click()
+                    # Wait for HLS manifest requests to appear (typically <1s)
+                    await asyncio.sleep(2)
+                    return True
+            except Exception:
+                continue
+        return False
 
     # ── Page stability check ─────────────────────────────────────────────────
 
@@ -7796,6 +8233,68 @@ class DeepEvidenceEngine:
         }
 
     # DOM snapshot JS — lightweight structural fingerprint at each viewport
+    _GRID_ANATOMY_JS = r'''() => {
+        // Find all CSS grid containers with 3+ children and read computed track values.
+        // Computed gridTemplateColumns resolves auto-fill/minmax to actual px tracks,
+        // so column count = token count in the resolved string.
+        function colCount(s) {
+            if (!s || s === 'none' || s === 'subgrid' || s === '') return 0;
+            return s.trim().split(/\s+/).filter(t => /^[\d.]/.test(t) && parseFloat(t) > 0).length;
+        }
+        function trackWidth(s) {
+            if (!s || s === 'none') return null;
+            const parts = s.trim().split(/\s+/).filter(t => /^[\d.]/.test(t) && parseFloat(t) > 0);
+            if (!parts.length) return null;
+            const vals = parts.map(t => parseFloat(t));
+            const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+            return avg + 'px';
+        }
+        const seen = new WeakSet();
+        const results = [];
+        for (const el of document.querySelectorAll('*')) {
+            if (seen.has(el)) continue;
+            const cs = window.getComputedStyle(el);
+            if (cs.display !== 'grid') continue;
+            if (el.children.length < 3) continue;
+            seen.add(el);
+            const cols = cs.gridTemplateColumns;
+            const nc = colCount(cols);
+            // Sample first child for item shape
+            const child = el.children[0];
+            let itemW = null, itemH = null, itemAR = null;
+            if (child) {
+                const cr = child.getBoundingClientRect();
+                const ccs = window.getComputedStyle(child);
+                itemW = Math.round(cr.width);
+                itemH = Math.round(cr.height);
+                itemAR = ccs.aspectRatio !== 'auto' ? ccs.aspectRatio : null;
+            }
+            // Best selector for this container
+            const cls = el.className && typeof el.className === 'string'
+                ? el.className.trim().split(/\s+/).filter(c => c.length > 1 && !/^\d/.test(c))[0]
+                : null;
+            const sel = cls ? '.' + cls : el.tagName.toLowerCase();
+            results.push({
+                selector: sel,
+                tag: el.tagName.toLowerCase(),
+                columnCount: nc,
+                gridTemplateColumns: cols,
+                gap: cs.gap,
+                columnGap: cs.columnGap,
+                rowGap: cs.rowGap,
+                childCount: el.children.length,
+                avgTrackWidth: trackWidth(cols),
+                itemWidth: itemW,
+                itemHeight: itemH,
+                itemAspectRatio: itemAR,
+                viewportWidth: window.innerWidth,
+            });
+            if (results.length >= 8) break;
+        }
+        // Sort by child count desc — most content-rich grids first
+        return results.sort((a, b) => b.childCount - a.childCount);
+    }'''
+
     _RESPONSIVE_SNAPSHOT_JS = r'''() => {
         const SELECTORS = [
             'nav', 'header', '[role="navigation"]', '[role="banner"]',
@@ -7876,6 +8375,13 @@ class DeepEvidenceEngine:
                     dom_snapshot = []
                     print(f"   ⚠️ DOM snapshot failed at {bp['name']}: {snap_err}")
 
+                # Measure computed grid anatomy at this viewport
+                try:
+                    grid_anatomy = await page.evaluate(self._GRID_ANATOMY_JS)
+                except Exception as grid_err:
+                    grid_anatomy = []
+                    print(f"   ⚠️ Grid anatomy failed at {bp['name']}: {grid_err}")
+
                 results.append({
                     'breakpoint': bp['name'],
                     'width': bp['width'],
@@ -7883,6 +8389,7 @@ class DeepEvidenceEngine:
                     'screenshot_b64': base64.b64encode(screenshot_bytes).decode('utf-8'),
                     'size_bytes': len(screenshot_bytes),
                     'dom_snapshot': dom_snapshot,
+                    'grid_anatomy': grid_anatomy,
                 })
                 print(f"   📸 {bp['name']} ({bp['width']}px): {len(screenshot_bytes) // 1024}KB, {len(dom_snapshot)} elements snapped")
             except Exception as e:
@@ -7893,6 +8400,7 @@ class DeepEvidenceEngine:
                     'height': bp['height'],
                     'screenshot_b64': None,
                     'dom_snapshot': [],
+                    'grid_anatomy': [],
                     'error': str(e)[:100],
                 })
 
@@ -9755,6 +10263,7 @@ class DeepEvidenceEngine:
                 'articles': links.get('articles', [])[:10],
                 'sections': links.get('sections', [])[:10],
                 'external': links.get('external', [])[:5],
+                'all': links.get('all', []),  # full list — consumed by url_patterns builder
                 'total_internal': len(links.get('all', [])) - len(links.get('external', []))
             },
             'suggested_next_steps': suggestions[:8],
