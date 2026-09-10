@@ -753,11 +753,13 @@ class DeepEvidenceEngine:
                 if wc_task:
                     try:
                         wc_candidates = await asyncio.wait_for(wc_task, timeout=100) or []
-                    except Exception:
-                        wc_candidates = []
+                    except asyncio.TimeoutError:
+                        print("   ⚠️  WaterCrawl timed out (Cloudflare path) — proceeding without it")
+                    except Exception as e:
+                        print(f"   ⚠️  WaterCrawl failed (Cloudflare path): {e}")
                 wc_urls = [c['url'] for c in wc_candidates]
                 all_urls = wc_urls + [u for u in cf_urls if u not in wc_urls]
-                selected = self._select_diverse_pages(all_urls, base_url, max_pages=3)
+                selected = self._select_diverse_pages(all_urls, base_url, max_pages=4)
                 result = {'home': base_url}
                 for key, url in selected.items():
                     if key == 'home':
@@ -891,9 +893,10 @@ class DeepEvidenceEngine:
         seen_pool: set = set()
         ordered_pool: List[str] = []
         for url in priority_urls + template_candidates + nav_links:
-            if url not in seen_pool and url.rstrip('/') != base_url.rstrip('/'):
+            url_norm = url.rstrip('/')
+            if url_norm not in seen_pool and url_norm != base_url.rstrip('/'):
                 ordered_pool.append(url)
-                seen_pool.add(url)
+                seen_pool.add(url_norm)
 
         if not ordered_pool:
             print("   ⚠️  No candidate pages found, using home page only")
@@ -2592,7 +2595,7 @@ class DeepEvidenceEngine:
             details = url_pats.get('details', {}) if isinstance(url_pats, dict) else {}
             all_links = details.get('all', []) if isinstance(details, dict) else []
             for item in all_links:
-                url_str = item.get('url', '') if isinstance(item, dict) else str(item)
+                url_str = item.get('url', '') if isinstance(item, dict) else (str(item) if item is not None else '')
                 if url_str:
                     all_cross_urls.add(url_str)
             meta_url = (result.get('meta_info') or {}).get('url', '')
@@ -5068,8 +5071,8 @@ class DeepEvidenceEngine:
                     patterns['stream_endpoints'].append(url)
             elif '.ts' in url and 'hls' in url.lower():
                 # HLS transport-stream segment — deduplicate by dropping timestamp suffix
-                import re as _re
-                seg_base = _re.sub(r'[\d_-]+\.ts.*$', '', url)
+                # Handles both POSIX (`_20240101_120000.ts`) and ISO 8601 (`_20240101T120000.ts`)
+                seg_base = re.sub(r'[\dT_-]+\.ts.*$', '', url)
                 if seg_base not in _seen_ts_base:
                     _seen_ts_base.add(seg_base)
                     # Represent the whole chunk stream with one example URL
@@ -5096,14 +5099,15 @@ class DeepEvidenceEngine:
                 post_data = req.get('post_data')
                 if post_data:
                     try:
-                        import json as _json
-                        body = _json.loads(post_data)
+                        body = json.loads(post_data)
+                        # Batch GraphQL: body is a list — take first operation's name
+                        if isinstance(body, list):
+                            body = body[0] if body else {}
                         op_name = body.get('operationName') or None
                         if not op_name:
-                            # Inline query — extract the first word after "query" or "mutation"
-                            import re as _re
+                            # Inline query — extract first word after query/mutation/subscription
                             raw_q = body.get('query', '')
-                            m = _re.search(r'\b(?:query|mutation|subscription)\s+(\w+)', raw_q)
+                            m = re.search(r'\b(?:query|mutation|subscription)\s+(\w+)', raw_q)
                             op_name = m.group(1) if m else None
                     except Exception:
                         pass
@@ -6717,7 +6721,6 @@ class DeepEvidenceEngine:
 
             if dismissed:
                 # Wait a beat for any CSS transitions to settle
-                import asyncio
                 await asyncio.sleep(500 / 1000)  # 500ms
                 print(f"   🔓 Gate dismissal attempted — checking if content is accessible")
 
@@ -6873,8 +6876,7 @@ class DeepEvidenceEngine:
                 # Map size tokens to pseudo-heading scale (largest → h1)
                 size_labels = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']
                 def _parse_size(s):
-                    import re as _re
-                    m = _re.match(r'([\d.]+)(px|rem|em)', s)
+                    m = re.match(r'([\d.]+)(px|rem|em)', s)
                     if not m: return 0
                     val, unit = float(m.group(1)), m.group(2)
                     return val * 16 if unit == 'rem' else val if unit == 'px' else val * 16
@@ -7244,13 +7246,13 @@ class DeepEvidenceEngine:
 
         Returns True if a play button was found and clicked.
         """
-        PLAY_SELECTORS = [
+        # Specific selectors are always tried; broad attribute selectors that
+        # could match embedded video players are only tried on sites that appear
+        # to be radio/streaming (URL or title contains a media keyword).
+        SAFE_SELECTORS = [
             "button[aria-label*='play live' i]",
             "button[aria-label*='play stream' i]",
             "button[aria-label*='listen live' i]",
-            "button[aria-label*='listen' i]",
-            "button[aria-label*='play' i]",
-            "[role='button'][aria-label*='play' i]",
             ".play-button",
             ".btn-play",
             "[class*='play'][class*='btn']",
@@ -7258,7 +7260,20 @@ class DeepEvidenceEngine:
             "button.player-play",
             "#play-button",
         ]
-        import asyncio
+        BROAD_SELECTORS = [
+            "button[aria-label*='listen' i]",
+            "button[aria-label*='play' i]",
+            "[role='button'][aria-label*='play' i]",
+        ]
+        _media_keywords = ('radio', 'stream', 'listen', 'live', 'broadcast', 'audio')
+        page_url = page.url.lower()
+        try:
+            page_title = (await page.title()).lower()
+        except Exception:
+            page_title = ''
+        is_media_site = any(kw in page_url or kw in page_title for kw in _media_keywords)
+        PLAY_SELECTORS = SAFE_SELECTORS + (BROAD_SELECTORS if is_media_site else [])
+
         for selector in PLAY_SELECTORS:
             try:
                 el = await page.query_selector(selector)
@@ -10446,8 +10461,6 @@ async def multi_template_discover(
           - 8+ alphanumeric chars with no internal meaning → :id (hashes)
           - Otherwise keep literal (structural segment like /blog, /shop)
         """
-        import re as _re
-
         # Short segments that look like slugs but are structural nav keywords
         _STRUCTURAL = {
             'blog', 'shop', 'features', 'about', 'podcast', 'news',
@@ -10462,12 +10475,12 @@ async def multi_template_discover(
         for part in parts:
             if not part:
                 continue
-            if _re.search(r'\d{4,}', part):              # year or long numeric ID
+            if re.search(r'\d{4,}', part):              # year or long numeric ID
                 out.append(':id')
             elif (part.lower() not in _STRUCTURAL          # not a nav keyword
-                  and _re.search(r'^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$', part, _re.I)):
+                  and re.search(r'^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$', part, re.I)):
                 out.append(':slug')                        # hyphenated-slug
-            elif _re.search(r'^[a-z0-9]{8,}$', part, _re.I):  # hash or UUID-ish
+            elif re.search(r'^[a-z0-9]{8,}$', part, re.I):  # hash or UUID-ish
                 out.append(':id')
             else:
                 out.append(part)                          # structural literal
