@@ -4,8 +4,15 @@ patchright>=1.0.0
 beautifulsoup4==4.14.3
 lxml==5.4.0
 
+# HLS manifest parsing — enriches detected .m3u8 URLs with stream count, bitrate, codecs
+m3u8>=3.0.0
+
 # Optional: Enhanced stealth (Cloudflare solver, requires Python 3.10+)
 # pip install "scrapling[fetchers]" && scrapling install
+
+# Optional: crawl4ai — Python-native Playwright-backed crawler with LLM page classification.
+# Runs as a parallel source alongside WaterCrawl in Smart Nav; silently skipped if absent.
+# pip install crawl4ai && crawl4ai-setup
 
 # Other dependencies
 pillow==11.3.0

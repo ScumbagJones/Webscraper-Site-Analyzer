@@ -733,14 +733,17 @@ class DeepEvidenceEngine:
         # selection runs — these are pages users explicitly want to understand.
         _PRIORITY_TYPES = ['schedule', 'shows', 'discover', 'archive', 'docs', 'blog']
 
-        # ── Phase 0: Launch WaterCrawl in background immediately ─────────────
-        # Pure HTTP calls — no browser needed. Starts while Playwright does its work.
+        # ── Phase 0: Launch background crawlers immediately ───────────────────
+        # Both run as asyncio tasks — pure HTTP/browser outside this Playwright
+        # session — so they execute concurrently with Playwright nav discovery.
         wc_task = None
+        c4ai_task = None
         try:
-            from scout import smart_nav_candidates
+            from scout import smart_nav_candidates, crawl4ai_candidates
             wc_task = asyncio.create_task(smart_nav_candidates(base_url, limit=12))
+            c4ai_task = asyncio.create_task(crawl4ai_candidates(base_url, limit=12))
         except Exception:
-            pass  # WaterCrawl not configured — continue without it
+            pass  # Scout module not configured — continue without it
 
         # ── Phase 1: Cloudflare discovery (if configured) ────────────────────
         if self.discovery_method in ('cloudflare', 'auto'):
@@ -853,7 +856,7 @@ class DeepEvidenceEngine:
             for url in template_candidates:
                 print(f"      ▸ {template_labels.get(url, url)}")
 
-        # ── Phase 4: Await WaterCrawl result (likely done by now) ────────────
+        # ── Phase 4: Await background crawlers (likely done by now) ─────────
         wc_candidates: List[Dict] = []
         if wc_task:
             try:
@@ -863,17 +866,35 @@ class DeepEvidenceEngine:
             except Exception as e:
                 print(f"   ⚠️  WaterCrawl failed: {e}")
 
+        c4ai_candidates: List[Dict] = []
+        if c4ai_task:
+            try:
+                c4ai_candidates = await asyncio.wait_for(c4ai_task, timeout=60) or []
+            except asyncio.TimeoutError:
+                print("   ⚠️  crawl4ai timed out — proceeding without it")
+            except Exception as e:
+                print(f"   ⚠️  crawl4ai failed: {e}")
+
+        # Merge crawl4ai results into wc_candidates — WaterCrawl takes priority
+        # for any URL both sources found (its word_count is more accurate since
+        # it fetches full page content; crawl4ai scores internal links at 0).
+        if c4ai_candidates:
+            wc_urls = {c['url'] for c in wc_candidates}
+            for item in c4ai_candidates:
+                if item['url'] not in wc_urls:
+                    wc_candidates.append(item)
+
         # ── Phase 5: Merge pools with priority ordering ───────────────────────
-        # Priority 1 — WaterCrawl typed pages: one slot per high-value semantic type.
-        #   These are pages users care about (schedule, shows, docs) that don't
-        #   always appear in the top nav bar.
+        # Priority 1 — WaterCrawl/crawl4ai typed pages: one slot per high-value
+        #   semantic type. These are pages users care about (schedule, shows,
+        #   docs) that don't always appear in the top nav bar.
         # Priority 2 — Template cluster representatives: deep content pages.
         # Priority 3 — Nav links + dropdown discoveries: top-level nav items.
         candidate_labels: dict = dict(template_labels)  # track all labels for logging
 
         priority_urls: List[str] = []
         if wc_candidates:
-            # Index WaterCrawl results by type for O(1) lookup
+            # Index results by type for O(1) lookup
             by_type: Dict[str, List[str]] = {}
             for c in wc_candidates:
                 by_type.setdefault(c['type'], []).append(c['url'])
@@ -5063,12 +5084,38 @@ class DeepEvidenceEngine:
                 base = url.split('?')[0]
                 if base not in _seen_manifests:
                     _seen_manifests.add(base)
-                    patterns['stream_endpoints'].append(url)
+                    entry: Dict = {'url': url, 'type': 'hls'}
+                    # Parse manifest for stream quality details when m3u8 is available
+                    try:
+                        import m3u8 as _m3u8
+                        import requests as _req
+                        resp = _req.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+                        if resp.ok:
+                            parsed = _m3u8.loads(resp.text)
+                            if parsed.is_variant:
+                                entry['hls_type'] = 'master'
+                                entry['stream_count'] = len(parsed.playlists)
+                                bws = [p.stream_info.bandwidth for p in parsed.playlists
+                                       if p.stream_info and p.stream_info.bandwidth]
+                                if bws:
+                                    entry['max_kbps'] = round(max(bws) / 1000)
+                                    entry['min_kbps'] = round(min(bws) / 1000)
+                                codecs = {c for p in parsed.playlists
+                                          if p.stream_info and p.stream_info.codecs
+                                          for c in (p.stream_info.codecs or '').split(',')}
+                                if codecs:
+                                    entry['codecs'] = sorted(c.strip() for c in codecs if c.strip())
+                            else:
+                                entry['hls_type'] = 'media'
+                                entry['segment_count'] = len(parsed.segments)
+                    except Exception:
+                        pass
+                    patterns['stream_endpoints'].append(entry)
             elif '.mpd' in url:  # DASH manifest
                 base = url.split('?')[0]
                 if base not in _seen_manifests:
                     _seen_manifests.add(base)
-                    patterns['stream_endpoints'].append(url)
+                    patterns['stream_endpoints'].append({'url': url, 'type': 'dash'})
             elif '.ts' in url and 'hls' in url.lower():
                 # HLS transport-stream segment — deduplicate by dropping timestamp suffix
                 # Handles both POSIX (`_20240101_120000.ts`) and ISO 8601 (`_20240101T120000.ts`)
@@ -5076,7 +5123,7 @@ class DeepEvidenceEngine:
                 if seg_base not in _seen_ts_base:
                     _seen_ts_base.add(seg_base)
                     # Represent the whole chunk stream with one example URL
-                    patterns['stream_endpoints'].append(url + '  [HLS segment]')
+                    patterns['stream_endpoints'].append({'url': url, 'type': 'hls_segment'})
 
         # Also add any CDP-captured WebSocket connections
         ws_urls = set()
@@ -6450,8 +6497,18 @@ class DeepEvidenceEngine:
 
     def _determine_api_pattern(self, patterns):
         parts = []
-        if len(patterns.get('stream_endpoints', [])) > 0:
-            parts.append(f"HLS/Stream ({len(patterns['stream_endpoints'])} manifest(s))")
+        streams = patterns.get('stream_endpoints', [])
+        if streams:
+            # Build a compact summary using parsed manifest details when available
+            masters = [s for s in streams if isinstance(s, dict) and s.get('hls_type') == 'master']
+            if masters:
+                m = masters[0]
+                detail = f"{m.get('stream_count', '?')} quality levels"
+                if m.get('max_kbps'):
+                    detail += f", {m['max_kbps']}kbps max"
+                parts.append(f"HLS/Stream ({detail})")
+            else:
+                parts.append(f"HLS/Stream ({len(streams)} endpoint(s))")
         gql = patterns.get('graphql', [])
         if gql:
             # Collect unique named operations
@@ -7246,9 +7303,34 @@ class DeepEvidenceEngine:
 
         Returns True if a play button was found and clicked.
         """
+        _media_keywords = ('radio', 'stream', 'listen', 'live', 'broadcast', 'audio')
+        page_url = page.url.lower()
+        try:
+            page_title = (await page.title()).lower()
+        except Exception:
+            page_title = ''
+
+        # Count native <audio>/<video> elements — strongest signal of a media page.
+        # Sites using MSE/blob: URLs still embed an <audio> or <video> tag even
+        # though the src is set via JavaScript after page load.
+        try:
+            native_media_count = await page.locator('audio, video').count()
+        except Exception:
+            native_media_count = 0
+
+        is_media_site = (
+            native_media_count > 0
+            or any(kw in page_url or kw in page_title for kw in _media_keywords)
+        )
+
+        # Fast exit: if neither URL/title keywords nor native media elements
+        # indicate this is a media page, skip entirely — avoids false positives
+        # on pages with embedded YouTube/Wistia product videos.
+        if not is_media_site:
+            return False
+
         # Specific selectors are always tried; broad attribute selectors that
-        # could match embedded video players are only tried on sites that appear
-        # to be radio/streaming (URL or title contains a media keyword).
+        # could match embedded video players are only tried on media sites.
         SAFE_SELECTORS = [
             "button[aria-label*='play live' i]",
             "button[aria-label*='play stream' i]",
@@ -7265,14 +7347,7 @@ class DeepEvidenceEngine:
             "button[aria-label*='play' i]",
             "[role='button'][aria-label*='play' i]",
         ]
-        _media_keywords = ('radio', 'stream', 'listen', 'live', 'broadcast', 'audio')
-        page_url = page.url.lower()
-        try:
-            page_title = (await page.title()).lower()
-        except Exception:
-            page_title = ''
-        is_media_site = any(kw in page_url or kw in page_title for kw in _media_keywords)
-        PLAY_SELECTORS = SAFE_SELECTORS + (BROAD_SELECTORS if is_media_site else [])
+        PLAY_SELECTORS = SAFE_SELECTORS + BROAD_SELECTORS
 
         for selector in PLAY_SELECTORS:
             try:

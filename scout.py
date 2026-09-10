@@ -23,6 +23,15 @@ from urllib.parse import urlparse
 
 import requests
 
+# Optional: crawl4ai — Python-native, Playwright-backed crawler with LLM
+# classification strategies.  Install with: pip install crawl4ai
+# When available it runs as a parallel source alongside WaterCrawl.
+try:
+    from crawl4ai import AsyncWebCrawler
+    _CRAWL4AI_AVAILABLE = True
+except ImportError:
+    _CRAWL4AI_AVAILABLE = False
+
 _API_BASE = 'https://app.watercrawl.dev/api/v1/core'
 _DEFAULT_LIMIT = 12          # pages to scout (keeps cost + latency low)
 _DEFAULT_MAX_PAGES = 5       # pages returned for deep-scan
@@ -257,6 +266,69 @@ def _select_diverse(pages: List[Dict], base_url: str, max_pages: int) -> List[st
             break
 
     return selected
+
+
+# ── crawl4ai source (optional) ────────────────────────────────────────────────
+
+async def crawl4ai_candidates(
+    base_url: str,
+    limit: int = _DEFAULT_LIMIT,
+) -> Optional[List[Dict]]:
+    """
+    Page candidates from crawl4ai — same format as smart_nav_candidates.
+
+    Returns [{url, type, word_count}, ...] or None when crawl4ai is not
+    installed.  Uses the same _classify() heuristic on returned markdown so
+    the output merges cleanly with WaterCrawl results.
+
+    Install: pip install crawl4ai && crawl4ai-setup
+    """
+    if not _CRAWL4AI_AVAILABLE:
+        return None
+
+    print(f'   🤖 crawl4ai: crawling {base_url} (background)…')
+    result: List[Dict] = []
+    try:
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            crawl_result = await asyncio.wait_for(
+                crawler.arun(url=base_url, bypass_cache=True),
+                timeout=60,
+            )
+        if not crawl_result or not crawl_result.success:
+            return []
+
+        # crawl4ai returns one page (the entry point); use its internal links
+        # to build a candidate pool the same way WaterCrawl does.
+        markdown = crawl_result.markdown or ''
+        title = crawl_result.metadata.get('title', '') if crawl_result.metadata else ''
+        ptype = _classify(base_url, title, markdown)
+        result.append({'url': base_url, 'type': ptype, 'word_count': len(markdown.split())})
+
+        # Harvest internal links from the crawled page
+        links = crawl_result.links or {}
+        internal = links.get('internal', [])
+        seen = {base_url}
+        for link in internal[:limit]:
+            url = link.get('href', '') if isinstance(link, dict) else str(link)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            link_md = ''  # no per-link content — classify by URL only
+            ltype = _classify(url, '', link_md)
+            result.append({'url': url, 'type': ltype, 'word_count': 0})
+
+        result.sort(key=lambda x: -x['word_count'])
+        type_summary: Dict[str, int] = {}
+        for item in result:
+            type_summary[item['type']] = type_summary.get(item['type'], 0) + 1
+        summary_str = ', '.join(f"{v}× {k}" for k, v in sorted(type_summary.items()))
+        print(f'   🤖 crawl4ai: {len(result)} pages — {summary_str}')
+    except asyncio.TimeoutError:
+        print('   ⚠️  crawl4ai timed out — proceeding without it')
+    except Exception as e:
+        print(f'   ⚠️  crawl4ai error: {e}')
+
+    return result or None
 
 
 # ── Public async interface ────────────────────────────────────────────────────
