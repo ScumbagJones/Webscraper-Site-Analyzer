@@ -2853,6 +2853,7 @@
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/dist/vis-network.min.js"></script>
     <script>
         mermaid.initialize({
             startOnLoad: false,
@@ -3045,6 +3046,9 @@
                 <button class="btn btn-secondary export-btn" onclick="exportCatalog()" style="display: none;" id="exportCatalogBtn" title="Export a json-render compatible component catalog — AI can generate new pages from this">
                     ⚡ Export Catalog (json-render)
                 </button>
+                <button class="btn btn-secondary export-btn" onclick="exportNetViz()" style="display: none;" id="exportNetVizBtn" title="Export API architecture as a NetViz FlowSnapshotV2 — import into NetViz for an interactive infrastructure map">
+                    🌐 Export to NetViz
+                </button>
             </div>
 
             <!-- Visual Hierarchy Tab -->
@@ -3187,15 +3191,42 @@
                         <!-- Stats will be inserted here -->
                     </div>
 
-                    <!-- Network Graph (radial) -->
-                    <div class="mermaid-container" id="apiNetworkGraphSection">
-                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
-                            <h3 style="margin:0;">🌐 API Network Graph</h3>
-                            <div style="display:flex; gap:4px;">
-                                <button class="api-view-toggle active" data-view="graph" onclick="toggleAPIView('graph')">Network</button>
-                                <button class="api-view-toggle" data-view="flow" onclick="toggleAPIView('flow')">Flow</button>
+                    <!-- View Toggle Bar -->
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                        <div style="display:flex; gap:4px;">
+                            <button class="api-view-toggle" data-view="canvas" onclick="toggleAPIView('canvas')">Canvas</button>
+                            <button class="api-view-toggle" data-view="graph" onclick="toggleAPIView('graph')">Radial</button>
+                            <button class="api-view-toggle" data-view="flow" onclick="toggleAPIView('flow')">Flow</button>
+                        </div>
+                        <button id="scoutWaterCrawlBtn" class="btn btn-secondary" onclick="scoutWithWaterCrawl()" style="font-size:0.78rem; padding:0.3rem 0.75rem; display:none;" title="Enrich page nodes with WaterCrawl type classification">
+                            🌊 Scout with WaterCrawl
+                        </button>
+                    </div>
+
+                    <!-- Canvas View (vis-network interactive) — default -->
+                    <div id="apiCanvasSection">
+                        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+                            <span style="font-size:0.75rem; color:#666; text-transform:uppercase; letter-spacing:0.05em;">Layers:</span>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.78rem; cursor:pointer;">
+                                <input type="checkbox" id="layerInfra" checked onchange="toggleCanvasLayer('infra')"> Infrastructure
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.78rem; cursor:pointer;">
+                                <input type="checkbox" id="layerPages" checked onchange="toggleCanvasLayer('pages')"> Site Pages
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; font-size:0.78rem; cursor:pointer;">
+                                <input type="checkbox" id="layerScoutChk" onchange="toggleCanvasLayer('scout')"> WaterCrawl
+                            </label>
+                        </div>
+                        <div id="apiVisCanvas" style="width:100%; height:500px; background:var(--card-bg, #111); border-radius:8px; border:1px solid var(--border-color, #2a2a2a); position:relative;">
+                            <div id="apiCanvasPlaceholder" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#555; font-size:0.9rem;">
+                                Run a scan to populate the canvas
                             </div>
                         </div>
+                        <div id="apiCanvasLegend" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem; font-size:0.72rem; color:#888; display:none;"></div>
+                    </div>
+
+                    <!-- Network Graph (radial) -->
+                    <div class="mermaid-container" id="apiNetworkGraphSection" style="display:none;">
                         <div id="apiRadialGraph">
                             <!-- Radial network graph will be rendered here -->
                         </div>
@@ -8893,6 +8924,7 @@
             document.getElementById('jsonCrackBtn').style.display = 'block';
             document.getElementById('exportFigmaBtn').style.display = 'block';
             document.getElementById('exportCatalogBtn').style.display = 'block';
+            document.getElementById('exportNetVizBtn').style.display = 'block';
         }
 
         function showEmptyTabState(tabId, reason, tabName, helpText) {
@@ -11666,6 +11698,62 @@
             const libs          = details.libraries || [];
             const choreography  = data.choreography || [];
             const personality   = data.motion_personality || '';
+            const narrative     = data.narrative || {};
+
+            // ── Narrative block: strategy + summary + context groups + anomalies ──
+            const strategyColors = {
+                layered:                 { bg: 'rgba(10,132,255,0.15)',  border: 'rgba(10,132,255,0.4)',  text: '#0a84ff'  },
+                expressive:              { bg: 'rgba(255,159,10,0.15)',  border: 'rgba(255,159,10,0.4)',  text: '#ff9f0a'  },
+                subtle:                  { bg: 'rgba(104,214,141,0.12)', border: 'rgba(104,214,141,0.4)', text: '#68d68d'  },
+                'performance-conscious': { bg: 'rgba(104,214,141,0.12)', border: 'rgba(104,214,141,0.4)', text: '#68d68d'  },
+                minimal:                 { bg: 'rgba(136,136,136,0.12)', border: 'rgba(136,136,136,0.3)', text: '#888'     },
+            };
+            const strategyKey = (narrative.strategy || '').toLowerCase();
+            const sc = strategyColors[strategyKey] || { bg: 'rgba(201,184,255,0.1)', border: 'rgba(201,184,255,0.3)', text: '#c9b8ff' };
+
+            const strategyBadge = narrative.strategy ? `
+                <span style="display:inline-block; background:${sc.bg}; border:1px solid ${sc.border}; color:${sc.text}; border-radius:20px; padding:3px 12px; font-size:0.72rem; font-weight:700; text-transform:capitalize; letter-spacing:0.03em;">${narrative.strategy}</span>
+            ` : '';
+
+            const summaryProse = narrative.summary ? `
+                <div style="font-size:0.80rem; color:#bbb; line-height:1.6; margin-top:8px;">${narrative.summary}</div>
+            ` : '';
+
+            // Context groups: hover / reveal / page_transition etc.
+            const ctxGroups = narrative.context_groups || {};
+            const ctxEntries = Object.entries(ctxGroups);
+            const ctxGroupsHTML = ctxEntries.length > 0 ? `
+                <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:6px; margin-top:10px;">
+                    ${ctxEntries.map(([ctx, val]) => {
+                        const props = (val.props || []).slice(0, 3).join(', ');
+                        const ctxLabel = ctx.replace(/_/g, ' ');
+                        return `<div style="background:rgba(255,255,255,0.04); border-radius:6px; padding:8px 10px; border-left:2px solid ${sc.border};">
+                            <div style="font-size:0.65rem; color:${sc.text}; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px;">${ctxLabel}</div>
+                            <div style="font-size:0.88rem; color:#fff; font-weight:600; font-family:'SF Mono',monospace;">${val.ms || '?'}ms</div>
+                            <div style="font-size:0.60rem; color:#666; margin-top:2px;">${val.elements || 0} elements</div>
+                            ${props ? `<div style="font-size:0.60rem; color:#555; margin-top:2px; word-break:break-word;">${props}</div>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            ` : '';
+
+            // Anomalies
+            const anomalies = narrative.anomalies || [];
+            const anomaliesHTML = anomalies.length > 0 ? `
+                <div style="margin-top:10px; padding:8px 12px; background:rgba(255,159,10,0.08); border-radius:6px; border-left:3px solid rgba(255,159,10,0.5);">
+                    <div style="font-size:0.65rem; color:#ff9f0a; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:5px;">⚠ ${anomalies.length} Anomal${anomalies.length === 1 ? 'y' : 'ies'}</div>
+                    ${anomalies.map(a => `<div style="font-size:0.75rem; color:#cc8800; line-height:1.5;">• ${a}</div>`).join('')}
+                </div>
+            ` : '';
+
+            const narrativeHTML = (strategyBadge || summaryProse || ctxGroupsHTML || anomaliesHTML) ? `
+                <div style="margin-bottom:0.75rem; padding:10px 12px; background:rgba(0,0,0,0.2); border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                    ${strategyBadge}
+                    ${summaryProse}
+                    ${ctxGroupsHTML}
+                    ${anomaliesHTML}
+                </div>
+            ` : '';
 
             // ── Duration tiers as horizontal bars ──
             const tiers = durScale.tiers || {};
@@ -12034,6 +12122,7 @@
                     <span class="confidence-badge confidence-${confidenceClass}">${data.confidence || 0}%</span>
                 </div>
                 ${personality ? `<div style="font-size: 0.82rem; color: var(--text-secondary); font-style: italic; padding: 0.5rem 0.75rem; background: rgba(201,184,255,0.08); border-left: 3px solid #c9b8ff; border-radius: 6px; margin-bottom: 0.75rem; line-height: 1.5;">${personality}</div>` : ''}
+                ${narrativeHTML}
                 ${comparisonHTML}
                 ${summaryHTML}
                 ${libsHTML}
@@ -13830,6 +13919,19 @@
                 radialContainer.innerHTML = '<p style="color: #888;">Not enough categories to render a network graph</p>';
             }
 
+            // ── Canvas View (vis-network) — built from relationship map + url_patterns ──
+            buildAPICanvas(relationshipMap);
+
+            // Default to canvas view
+            toggleAPIView('canvas');
+
+            // Show WaterCrawl scout button when a URL is known
+            const siteUrlForScout = (window.__currentEvidence && (window.__currentEvidence.meta_info?.url || window.__currentEvidence.url)) || '';
+            if (siteUrlForScout) {
+                document.getElementById('scoutWaterCrawlBtn').style.display = '';
+                document.getElementById('scoutWaterCrawlBtn').dataset.siteUrl = siteUrlForScout;
+            }
+
             // ── Mermaid Flow Diagram (secondary view) ──
             const mermaidContainer = document.getElementById('mermaidDiagram');
             if (relationshipMap.mermaid_diagram) {
@@ -14171,18 +14273,309 @@
             });
         }
 
+        // ─── vis-network canvas state ─────────────────────────────────────────────
+        let _visNetwork = null;
+        let _visNodes = null;
+        let _visEdges = null;
+
+        // Semantic role → vis-network group
+        const _ROLE_GROUP = {
+            authentication: 'server', auth: 'server',
+            content: 'server',
+            search: 'server',
+            graphql: 'server',
+            realtime: 'server',
+            media: 'proxy', cdn: 'proxy',
+            analytics: 'external', advertising: 'external',
+            config: 'external', feature_flags: 'external',
+            monetization: 'server', user: 'server',
+            interaction: 'server',
+        };
+
+        const _PAGE_TYPE_COLORS = {
+            landing:   { bg: '#4ade80', border: '#22c55e' },
+            docs:      { bg: '#60a5fa', border: '#3b82f6' },
+            blog:      { bg: '#fb923c', border: '#f97316' },
+            product:   { bg: '#facc15', border: '#eab308' },
+            ecommerce: { bg: '#c084fc', border: '#a855f7' },
+            press:     { bg: '#94a3b8', border: '#64748b' },
+            search:    { bg: '#67e8f9', border: '#22d3ee' },
+            other:     { bg: '#9ca3af', border: '#6b7280' },
+        };
+
+        function _hostLabel(url) {
+            try {
+                const h = new URL(url.includes('://') ? url : 'https://' + url).hostname;
+                const parts = h.split('.');
+                if (parts.length >= 3 && parts[0] !== 'www') {
+                    const root = parts[parts.length - 2];
+                    const sub  = parts[0];
+                    return sub.toLowerCase() === root.toLowerCase() ? root : `${root} (${sub})`;
+                }
+                return parts.length >= 2 ? parts[parts.length - 2] : h;
+            } catch { return url.slice(0, 20); }
+        }
+
+        function _pageTypeFromPath(url) {
+            try {
+                const path = new URL(url).pathname.toLowerCase();
+                if (/\/docs?\/|\/api\/|\/reference\/|\/guide\//.test(path)) return 'docs';
+                if (/\/blog\/|\/articles?\/|\/news\/|\/post\//.test(path)) return 'blog';
+                if (/\/pricing|\/features?|\/product\//.test(path)) return 'product';
+                if (/\/shop\/|\/store\/|\/cart|\/checkout/.test(path)) return 'ecommerce';
+                if (/\/press\/|\/media\/|\/newsroom/.test(path)) return 'press';
+                if (/\/search\//.test(path)) return 'search';
+                if (path === '/' || path === '') return 'landing';
+            } catch {}
+            return 'other';
+        }
+
+        function buildAPICanvas(relationshipMap) {
+            const container = document.getElementById('apiVisCanvas');
+            const placeholder = document.getElementById('apiCanvasPlaceholder');
+            if (placeholder) placeholder.style.display = 'none';
+
+            const endpoints = relationshipMap.endpoints || [];
+            const semantic  = relationshipMap.semantic_classification || {};
+            const rels      = relationshipMap.relationships || [];
+            const ev        = window.__currentEvidence || {};
+            const urlPats   = ev.url_patterns || {};
+
+            // Map each endpoint URL → role
+            const urlRole = {};
+            for (const [role, eps] of Object.entries(semantic)) {
+                for (const ep of eps) { urlRole[ep.url || ''] = role; }
+            }
+
+            const nodeArr = [];
+            const edgeArr = [];
+            const seen = new Set();
+            let nid = 1;
+
+            // Origin host
+            const originUrl = ev.meta_info?.url || ev.url || '';
+            let originHost = '';
+            try { originHost = new URL(originUrl).hostname; } catch {}
+
+            // Browser node
+            nodeArr.push({ id: nid++, label: 'Browser', group: 'browser',
+                title: 'User / browser client', layer: 'infra' });
+            const browserNid = nid - 1;
+
+            // Origin LB node
+            let originNid = null;
+            if (originHost) {
+                nodeArr.push({ id: nid++, label: _hostLabel(originUrl) + '\n(origin)', group: 'origin',
+                    title: originHost, layer: 'infra' });
+                originNid = nid - 1;
+                edgeArr.push({ from: browserNid, to: originNid, label: 'HTTPS',
+                    arrows: 'to', dashes: false });
+                seen.add(originHost);
+            }
+
+            // API endpoint nodes — group by hostname
+            const hostNodeId = {};
+            for (const ep of endpoints) {
+                let host = '';
+                try { host = new URL(ep.url).hostname; } catch { continue; }
+                if (!host || host === originHost) continue;
+                if (seen.has(host)) continue;
+                seen.add(host);
+
+                const role = urlRole[ep.url] || 'unclassified';
+                const group = _ROLE_GROUP[role] || 'server';
+                const id = nid++;
+                nodeArr.push({ id, label: _hostLabel(ep.url), group,
+                    title: `${host}\nRole: ${role}\n${ep.call_count || 1} call(s)`, layer: 'infra' });
+                hostNodeId[host] = id;
+
+                const src = originNid || browserNid;
+                const methods = [ep.method || 'GET'].filter(Boolean);
+                edgeArr.push({ from: src, to: id, label: methods[0], arrows: 'to' });
+            }
+
+            // Relationship chain edges
+            for (let i = 0; i < rels.length && i < 20; i++) {
+                const r = rels[i];
+                const sh = r.from || r.source_url || '';
+                const th = r.to   || r.target_url || '';
+                let srcHost = ''; try { srcHost = new URL(sh).hostname; } catch {}
+                let tgtHost = ''; try { tgtHost = new URL(th).hostname; } catch {}
+                const srcId = hostNodeId[srcHost];
+                const tgtId = hostNodeId[tgtHost];
+                if (srcId && tgtId && srcId !== tgtId) {
+                    edgeArr.push({ from: srcId, to: tgtId, label: r.type === 'sequential' ? 'then' : '',
+                        arrows: 'to', dashes: true, color: { color: '#555' } });
+                }
+            }
+
+            // Page nodes from url_patterns
+            const pageUrls = urlPats.all || [];
+            const pageSample = pageUrls.slice(0, 30);
+            for (const url of pageSample) {
+                if (!url || url === originUrl) continue;
+                let host = '';
+                try { host = new URL(url).hostname; } catch { continue; }
+                if (host !== originHost) continue; // internal only
+                const ptype = _pageTypeFromPath(url);
+                const col = _PAGE_TYPE_COLORS[ptype] || _PAGE_TYPE_COLORS.other;
+                const id = nid++;
+                const path = new URL(url).pathname.replace(/\/$/, '') || '/';
+                const shortPath = path.length > 22 ? '…' + path.slice(-20) : path;
+                nodeArr.push({
+                    id, label: shortPath, group: 'page',
+                    color: { background: col.bg, border: col.border, highlight: { background: col.bg, border: col.border } },
+                    font: { size: 11 }, size: 14, shape: 'dot',
+                    title: `${url}\nType: ${ptype}`, layer: 'pages', pageType: ptype,
+                });
+                if (originNid) {
+                    edgeArr.push({ from: originNid, to: id, arrows: 'to',
+                        color: { color: '#2a2a2a' }, width: 1 });
+                }
+            }
+
+            // Build datasets
+            _visNodes = new vis.DataSet(nodeArr);
+            _visEdges = new vis.DataSet(edgeArr);
+
+            const options = {
+                physics: {
+                    enabled: true,
+                    barnesHut: { gravitationalConstant: -6000, springLength: 140, springConstant: 0.04 },
+                    stabilization: { iterations: 120 },
+                },
+                nodes: {
+                    font: { color: '#ddd', size: 12 },
+                    borderWidth: 2,
+                    shadow: { enabled: true, size: 5, color: 'rgba(0,0,0,0.4)' },
+                },
+                edges: {
+                    font: { size: 10, color: '#888', align: 'middle' },
+                    smooth: { type: 'dynamic' },
+                    color: { color: '#444', highlight: '#888' },
+                    width: 1.5,
+                },
+                groups: {
+                    browser: { shape: 'square',   size: 24, color: { background: '#0ea5e9', border: '#0284c7' } },
+                    origin:  { shape: 'diamond',  size: 26, color: { background: '#10b981', border: '#059669' } },
+                    server:  { shape: 'circle',   size: 20, color: { background: '#6366f1', border: '#4f46e5' } },
+                    proxy:   { shape: 'triangle', size: 20, color: { background: '#a78bfa', border: '#7c3aed' } },
+                    external:{ shape: 'ellipse',  size: 20, color: { background: '#2dd4bf', border: '#0d9488' } },
+                    page:    { shape: 'dot',      size: 12, color: { background: '#374151', border: '#6b7280' } },
+                },
+                interaction: {
+                    hover: true, tooltipDelay: 200,
+                    navigationButtons: false, keyboard: true,
+                },
+                layout: { improvedLayout: true },
+            };
+
+            if (_visNetwork) { _visNetwork.destroy(); }
+            _visNetwork = new vis.Network(container, { nodes: _visNodes, edges: _visEdges }, options);
+
+            // Render legend
+            _renderCanvasLegend();
+        }
+
+        function _renderCanvasLegend() {
+            const leg = document.getElementById('apiCanvasLegend');
+            if (!leg) return;
+            const items = [
+                { color: '#10b981', label: 'Origin server' },
+                { color: '#6366f1', label: 'API server' },
+                { color: '#a78bfa', label: 'CDN / proxy' },
+                { color: '#2dd4bf', label: 'External service' },
+                { color: '#4ade80', label: 'Landing page' },
+                { color: '#60a5fa', label: 'Docs page' },
+                { color: '#fb923c', label: 'Blog page' },
+                { color: '#facc15', label: 'Product page' },
+                { color: '#67e8f9', label: 'WaterCrawl enriched' },
+            ];
+            leg.style.display = 'flex';
+            leg.innerHTML = items.map(i =>
+                `<span style="display:flex;align-items:center;gap:4px;">
+                    <span style="width:10px;height:10px;border-radius:50%;background:${i.color};display:inline-block;"></span>
+                    ${i.label}
+                </span>`
+            ).join('');
+        }
+
+        function toggleCanvasLayer(layer) {
+            if (!_visNodes) return;
+            const checked = document.getElementById(
+                layer === 'infra' ? 'layerInfra' :
+                layer === 'pages' ? 'layerPages' : 'layerScoutChk'
+            )?.checked;
+            const updates = _visNodes.get().filter(n => n.layer === layer || (layer === 'scout' && n.layer === 'scout')).map(n => ({
+                id: n.id, hidden: !checked
+            }));
+            _visNodes.update(updates);
+        }
+
+        function scoutWithWaterCrawl() {
+            const btn = document.getElementById('scoutWaterCrawlBtn');
+            const siteUrl = btn.dataset.siteUrl || '';
+            if (!siteUrl) { alert('No site URL available. Run a scan first.'); return; }
+            const orig = btn.innerHTML;
+            btn.innerHTML = '🌊 Scouting…';
+            btn.disabled = true;
+
+            fetch('/api/scout-map', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ site_url: siteUrl, limit: 20 }),
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.innerHTML = orig; btn.disabled = false;
+                if (!data.success) { alert('Scout failed: ' + (data.error || 'unknown')); return; }
+
+                const pages = data.pages || [];
+                if (!_visNodes) return;
+
+                // Update existing page nodes with richer type info from WaterCrawl
+                // Add scout nodes for URLs not yet in the canvas
+                const existingLabels = new Set(_visNodes.get().map(n => n.title || ''));
+                let nid = Math.max(..._visNodes.getIds()) + 1;
+                const updates = [];
+                const adds = [];
+
+                for (const p of pages) {
+                    const col = _PAGE_TYPE_COLORS[p.type] || _PAGE_TYPE_COLORS.other;
+                    // Try to find an existing page node for this URL
+                    const existing = _visNodes.get().find(n => n.title && n.title.startsWith(p.url));
+                    if (existing) {
+                        updates.push({ id: existing.id, layer: 'scout',
+                            label: (new URL(p.url).pathname || '/').slice(0, 22) + '\n' + p.type,
+                            color: { background: col.bg, border: col.border,
+                                highlight: { background: col.bg, border: col.border } },
+                            title: `${p.url}\nType: ${p.type} (WaterCrawl)\nWords: ${p.word_count}` });
+                    } else {
+                        adds.push({ id: nid++, label: p.title?.slice(0, 20) || p.url.split('/').pop() || '/',
+                            group: 'page', layer: 'scout', pageType: p.type,
+                            color: { background: col.bg, border: col.border,
+                                highlight: { background: col.bg, border: col.border } },
+                            title: `${p.url}\nType: ${p.type} (WaterCrawl)\nWords: ${p.word_count}`,
+                        });
+                    }
+                }
+                if (updates.length) _visNodes.update(updates);
+                if (adds.length) _visNodes.add(adds);
+                document.getElementById('layerScoutChk').checked = true;
+                _visNetwork && _visNetwork.stabilize(80);
+            })
+            .catch(err => { btn.innerHTML = orig; btn.disabled = false; alert('Scout error: ' + err); });
+        }
+
         function toggleAPIView(view) {
+            const canvasSection = document.getElementById('apiCanvasSection');
             const graphSection = document.getElementById('apiNetworkGraphSection');
             const flowSection = document.getElementById('apiFlowSection');
             const btns = document.querySelectorAll('.api-view-toggle');
             btns.forEach(function(b) { b.classList.toggle('active', b.dataset.view === view); });
-            if (view === 'graph') {
-                graphSection.style.display = '';
-                flowSection.style.display = 'none';
-            } else {
-                graphSection.style.display = 'none';
-                flowSection.style.display = '';
-            }
+            canvasSection.style.display = view === 'canvas' ? '' : 'none';
+            graphSection.style.display  = view === 'graph'  ? '' : 'none';
+            flowSection.style.display   = view === 'flow'   ? '' : 'none';
         }
 
         function copyMermaidCode(event) {
@@ -14575,6 +14968,42 @@
                 a.click();
             })
             .catch(err => alert('Export failed: ' + err));
+        }
+
+        function exportNetViz() {
+            if (!currentEvidence) return;
+            const btn = document.getElementById('exportNetVizBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Building snapshot...';
+            btn.disabled = true;
+
+            const siteUrl = currentEvidence.meta_info?.url || currentEvidence.url || '';
+            const domain = siteUrl.replace(/https?:\/\//, '').replace(/\/.*/,'').replace(/[^a-zA-Z0-9.-]/g, '');
+
+            fetch('/api/export-netviz', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({evidence: currentEvidence, site_url: siteUrl})
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                if (!data.success) { alert('NetViz export failed: ' + (data.error || 'unknown')); return; }
+                const json = JSON.stringify(data.snapshot, null, 2);
+                const blob = new Blob([json], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = data.filename || `${domain || 'site'}-netviz.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            })
+            .catch(err => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                alert('NetViz export failed: ' + err);
+            });
         }
 
         function exportCatalog() {

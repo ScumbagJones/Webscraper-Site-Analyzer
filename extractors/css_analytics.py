@@ -584,6 +584,31 @@ class CSSAnalyticsExtractor(BaseExtractor):
     def _build_result(self, raw: Dict) -> Dict:
         total_rules = raw.get('totalRules', 0)
         total_decls = raw.get('totalDeclarations', 0)
+        inaccessible = raw.get('inaccessible', 0)
+        total_sheets = raw.get('totalSheets', 0)
+
+        # Surface CDN-blocked access as an explicit degraded result rather than
+        # silently returning near-zero numbers that look like a sparse stylesheet.
+        if total_rules == 0 and inaccessible > 0:
+            return {
+                'pattern': f'CSS analytics degraded — {inaccessible}/{total_sheets} stylesheet(s) blocked by CORS/CDN',
+                'confidence': 10,
+                'access_strategy': 'cdn_blocked',
+                'stylesheet_stats': {
+                    'total_stylesheets': total_sheets,
+                    'inaccessible_sheets': inaccessible,
+                    'total_rules': 0,
+                },
+                'modern_features': {k: False for k in (
+                    'nesting', 'cascade_layers', 'container_queries',
+                    'has_selector', 'is_where_selectors', 'color_mix',
+                    'light_dark', 'nesting_depth_max', 'subgrid',
+                )},
+                'degraded': True,
+                'degraded_reason': 'All stylesheets served from a cross-origin CDN with CORS restrictions. '
+                                   'Neither same-origin access nor the fetch() fallback could read rules.',
+            }
+
         properties = raw.get('properties', {})
         custom_props = raw.get('customProps', [])
         color_values = raw.get('colorValues', {})

@@ -47,7 +47,9 @@ class ColorExtractor(BaseExtractor):
                 const tag = el.tagName.toLowerCase();
 
                 // Count color usage (global)
-                [styles.color, styles.backgroundColor, styles.borderColor].forEach(function(color) {
+                // Use borderTopColor (single side) — borderColor shorthand can return
+                // "rgb(a) rgb(b) rgb(c) rgb(d)" when sides differ, corrupting palette data.
+                [styles.color, styles.backgroundColor, styles.borderTopColor].forEach(function(color) {
                     if (color && color !== 'rgba(0, 0, 0, 0)') {
                         colorCounts[color] = (colorCounts[color] || 0) + 1;
                     }
@@ -237,10 +239,14 @@ class ColorExtractor(BaseExtractor):
 
     @staticmethod
     def _analyze_color_palette(colors):
-        """Simple color grouping"""
+        """Simple color grouping. Filters out multi-value shorthand strings
+        (e.g. CSS border-color returning 'rgb(a) rgb(b) rgb(c) rgb(d)')."""
+        import re
+        _multi_val = re.compile(r'\)\s+\w')  # ') rgb(' or ') #' etc — multiple values
+        clean = [c for c in colors if c and not _multi_val.search(c)]
         return {
-            'primary': colors[:5],
-            'secondary': colors[5:10] if len(colors) > 5 else []
+            'primary': clean[:5],
+            'secondary': clean[5:10] if len(clean) > 5 else []
         }
 
     @staticmethod

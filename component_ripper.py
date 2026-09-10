@@ -793,6 +793,15 @@ class ComponentRipper:
         except Exception as e:
             blueprint['anatomy'] = {'error': str(e), 'zones': [], 'layout_system': {}, 'child_summary': {}}
 
+        # ── Fix 1: Pseudo-elements (::before / ::after) ──────────────────────
+        blueprint['pseudo_elements'] = await self._extract_pseudo_elements(page, selector)
+
+        # ── Fix 2: CSS custom property names ─────────────────────────────────
+        blueprint['css_variables'] = await self._extract_css_variables(page, selector)
+
+        # ── Fix 4: Keyframe definitions ───────────────────────────────────────
+        blueprint['keyframes'] = await self._extract_keyframes(page, selector)
+
         # Extract Tailwind classes (V2 enhancement)
         tailwind_extraction = await self._extract_tailwind_classes(page, selector)
         blueprint['tailwind'] = tailwind_extraction
@@ -861,6 +870,12 @@ class ComponentRipper:
                 'total_observed': 0,
             }
 
+        # ── Fix 5: :active / :checked states ─────────────────────────────────
+        blueprint['active_checked_states'] = await self._extract_active_checked_states(page, selector)
+
+        # ── Fix 3: Absolute-positioned floating children ──────────────────────
+        blueprint['floating_children'] = await self._find_floating_children(page, selector)
+
         # Generate Markdown documentation (V2)
         component_name = selector.replace('.', '').replace('#', '').replace('[', '').replace(']', '')
         blueprint['markdown'] = self._generate_markdown_doc(blueprint, component_name)
@@ -879,6 +894,331 @@ class ComponentRipper:
                 blueprint['screenshot_error'] = str(_se)
 
         return blueprint
+
+    async def _extract_pseudo_elements(self, page, selector: str) -> Dict:
+        """Capture ::before and ::after computed styles on root and children."""
+        return await page.evaluate('''(selector) => {
+            const PSEUDO_PROPS = [
+                'content', 'display', 'position', 'width', 'height',
+                'background', 'backgroundColor', 'backgroundImage',
+                'color', 'top', 'left', 'right', 'bottom',
+                'borderRadius', 'opacity', 'transform', 'transition',
+                'zIndex', 'pointerEvents', 'fontSize', 'fontWeight',
+            ];
+            function readPseudo(el, pseudo) {
+                const cs = window.getComputedStyle(el, pseudo);
+                const content = cs.content;
+                if (!content || content === 'none' || content === 'normal') return null;
+                const out = { content };
+                for (const p of PSEUDO_PROPS) {
+                    const v = cs[p];
+                    if (v && v !== 'none' && v !== 'normal' && v !== 'auto' && v !== '0px') out[p] = v;
+                }
+                return out;
+            }
+            const root = document.querySelector(selector);
+            if (!root) return { root: {}, children: [] };
+            const result = {
+                root: { before: readPseudo(root, '::before'), after: readPseudo(root, '::after') },
+                children: [],
+            };
+            for (const kid of Array.from(root.querySelectorAll('*')).slice(0, 15)) {
+                const before = readPseudo(kid, '::before');
+                const after  = readPseudo(kid, '::after');
+                if (!before && !after) continue;
+                const cls = typeof kid.className === 'string'
+                    ? kid.className.trim().split(/\s+/).filter(c => c.length > 1)[0] : null;
+                result.children.push({
+                    selector: cls ? ('.' + cls) : kid.tagName.toLowerCase(),
+                    tag: kid.tagName.toLowerCase(),
+                    before,
+                    after,
+                });
+            }
+            return result;
+        }''', selector)
+
+    async def _extract_css_variables(self, page, selector: str) -> Dict:
+        """Map CSS property names back to the custom property (var(--*)) that provides them."""
+        return await page.evaluate('''(selector) => {
+            const root = document.querySelector(selector);
+            if (!root) return { defined: {}, property_var_map: {}, all_referenced: [] };
+
+            // Custom props defined/inherited on this element
+            const rootCS = window.getComputedStyle(root);
+            const defined = {};
+            for (let i = 0; i < rootCS.length; i++) {
+                const p = rootCS[i];
+                if (p.startsWith('--')) defined[p] = rootCS.getPropertyValue(p).trim();
+            }
+
+            // Walk stylesheets for var() references in rules that match root or children
+            const allEls = [root, ...Array.from(root.querySelectorAll('*')).slice(0, 30)];
+            const varPattern = /var\\(\\s*(--[^,)\\s]+)/g;
+            const propVarMap = {};   // cssProp -> [--var-name]
+            const allReferenced = new Set();
+
+            for (const sheet of document.styleSheets) {
+                try {
+                    for (const rule of (sheet.cssRules || [])) {
+                        if (!rule.selectorText) continue;
+                        const matchesAny = allEls.some(el => {
+                            try { return el.matches(rule.selectorText); } catch { return false; }
+                        });
+                        if (!matchesAny) continue;
+                        let m;
+                        varPattern.lastIndex = 0;
+                        while ((m = varPattern.exec(rule.cssText)) !== null) {
+                            const varName = m[1].trim();
+                            allReferenced.add(varName);
+                            // Try to find which CSS property uses this var
+                            const before = rule.cssText.substring(0, m.index);
+                            const propMatch = before.match(/([\\w-]+)\\s*:\\s*[^;]*$/);
+                            if (propMatch) {
+                                const cssProp = propMatch[1];
+                                if (!propVarMap[cssProp]) propVarMap[cssProp] = [];
+                                if (!propVarMap[cssProp].includes(varName)) propVarMap[cssProp].push(varName);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            return {
+                defined,
+                property_var_map: propVarMap,
+                all_referenced: Array.from(allReferenced),
+            };
+        }''', selector)
+
+    async def _extract_keyframes(self, page, selector: str) -> Dict:
+        """Find @keyframes definitions for animations used by the component."""
+        return await page.evaluate('''(selector) => {
+            const root = document.querySelector(selector);
+            if (!root) return { names: [], definitions: [] };
+
+            const names = new Set();
+            for (const el of [root, ...Array.from(root.querySelectorAll('*')).slice(0, 30)]) {
+                const anim = window.getComputedStyle(el).animationName;
+                if (anim && anim !== 'none') {
+                    anim.split(',').map(n => n.trim()).filter(n => n && n !== 'none').forEach(n => names.add(n));
+                }
+            }
+            if (!names.size) return { names: [], definitions: [] };
+
+            const definitions = [];
+            for (const sheet of document.styleSheets) {
+                try {
+                    for (const rule of (sheet.cssRules || [])) {
+                        if (rule.type !== CSSRule.KEYFRAMES_RULE) continue;
+                        if (!names.has(rule.name)) continue;
+                        const keyframes = Array.from(rule.cssRules).map(kf => ({
+                            offset: kf.keyText,
+                            css: kf.cssText,
+                        }));
+                        definitions.push({ name: rule.name, keyframes, cssText: rule.cssText.substring(0, 800) });
+                    }
+                } catch (e) {}
+            }
+            return { names: Array.from(names), definitions };
+        }''', selector)
+
+    async def _extract_active_checked_states(self, page, selector: str) -> Dict:
+        """Capture :active (mousedown) and :checked state deltas for buttons and form controls."""
+        import asyncio as _aio
+        results = {'active': [], 'checked': [], 'detected': False}
+
+        try:
+            # --- :active via mousedown hold ---
+            buttons = await page.evaluate('''(selector) => {
+                const root = document.querySelector(selector);
+                if (!root) return [];
+                const els = [root, ...root.querySelectorAll('button, [role="button"], a[href]')].slice(0, 3);
+                return els.map(el => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) return null;
+                    const cs = window.getComputedStyle(el);
+                    const cls = typeof el.className === 'string' ? el.className.trim().split(/\\s+/)[0] : '';
+                    return {
+                        selector: cls ? '.' + cls : el.tagName.toLowerCase(),
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+                        baseline: {
+                            backgroundColor: cs.backgroundColor,
+                            color: cs.color,
+                            transform: cs.transform,
+                            boxShadow: cs.boxShadow,
+                            opacity: cs.opacity,
+                        }
+                    };
+                }).filter(Boolean);
+            }''', selector)
+
+            for btn in buttons[:2]:
+                try:
+                    await page.mouse.move(btn['x'], btn['y'])
+                    await page.mouse.down()
+                    await _aio.sleep(0.05)
+                    active_styles = await page.evaluate('''(args) => {
+                        const el = document.elementFromPoint(args.x, args.y);
+                        if (!el) return null;
+                        const cs = window.getComputedStyle(el);
+                        return {
+                            backgroundColor: cs.backgroundColor,
+                            color: cs.color,
+                            transform: cs.transform,
+                            boxShadow: cs.boxShadow,
+                            opacity: cs.opacity,
+                        };
+                    }''', {'x': btn['x'], 'y': btn['y']})
+                    await page.mouse.up()
+                    if active_styles:
+                        delta = {k: v for k, v in active_styles.items() if v != btn['baseline'].get(k)}
+                        if delta:
+                            results['active'].append({'selector': btn['selector'], 'delta': delta})
+                            results['detected'] = True
+                except Exception:
+                    try:
+                        await page.mouse.up()
+                    except Exception:
+                        pass
+
+            # --- :checked via click toggle on checkboxes/radios ---
+            checkboxes = await page.evaluate('''(selector) => {
+                const root = document.querySelector(selector);
+                if (!root) return [];
+                return Array.from(root.querySelectorAll('input[type="checkbox"], input[type="radio"]')).slice(0, 3).map(el => {
+                    const rect = el.getBoundingClientRect();
+                    const cs = window.getComputedStyle(el);
+                    const lbl = el.labels?.[0];
+                    const lblCS = lbl ? window.getComputedStyle(lbl) : null;
+                    return {
+                        type: el.type,
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+                        checked: el.checked,
+                        baseline: { color: cs.color, backgroundColor: cs.backgroundColor },
+                        label_baseline: lblCS ? { color: lblCS.color, fontWeight: lblCS.fontWeight } : null,
+                    };
+                });
+            }''', selector)
+
+            for cb in checkboxes[:2]:
+                try:
+                    await page.mouse.click(cb['x'], cb['y'])
+                    await _aio.sleep(0.08)
+                    checked_styles = await page.evaluate('''(args) => {
+                        const el = document.elementFromPoint(args.x, args.y);
+                        if (!el) return null;
+                        const cs = window.getComputedStyle(el);
+                        const lbl = el.labels?.[0];
+                        const lblCS = lbl ? window.getComputedStyle(lbl) : null;
+                        return {
+                            checked: el.checked,
+                            color: cs.color,
+                            backgroundColor: cs.backgroundColor,
+                            label: lblCS ? { color: lblCS.color, fontWeight: lblCS.fontWeight } : null,
+                        };
+                    }''', {'x': cb['x'], 'y': cb['y']})
+                    # Restore original state
+                    await page.mouse.click(cb['x'], cb['y'])
+                    if checked_styles:
+                        delta = {}
+                        if checked_styles.get('color') != cb['baseline'].get('color'):
+                            delta['color'] = checked_styles['color']
+                        if checked_styles.get('backgroundColor') != cb['baseline'].get('backgroundColor'):
+                            delta['backgroundColor'] = checked_styles['backgroundColor']
+                        results['checked'].append({
+                            'type': cb['type'],
+                            'checked_state': checked_styles,
+                            'delta': delta,
+                        })
+                        results['detected'] = True
+                except Exception:
+                    pass
+
+        except Exception as e:
+            results['error'] = str(e)[:100]
+
+        return results
+
+    async def _find_floating_children(self, page, selector: str) -> Dict:
+        """Detect dropdowns, tooltips, and popovers triggered by this component."""
+        import asyncio as _aio
+        result = {'aria_targets': [], 'floating_panels': [], 'detected': False}
+
+        # Step 1: aria-controls / aria-owns (static — no interaction needed)
+        aria_targets = await page.evaluate('''(selector) => {
+            const root = document.querySelector(selector);
+            if (!root) return [];
+            const out = [];
+            for (const el of root.querySelectorAll('[aria-controls], [aria-owns], [aria-haspopup]')) {
+                const targetId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+                if (!targetId) continue;
+                const target = document.getElementById(targetId);
+                if (!target) continue;
+                const cs = window.getComputedStyle(target);
+                const rect = target.getBoundingClientRect();
+                const cls = typeof el.className === 'string' ? el.className.trim().split(/\\s+/)[0] : '';
+                out.push({
+                    trigger: cls ? ('.' + cls) : el.tagName.toLowerCase(),
+                    target_id: targetId,
+                    target_tag: target.tagName.toLowerCase(),
+                    position: cs.position,
+                    display: cs.display,
+                    zIndex: cs.zIndex,
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                    outerHTML: target.outerHTML.substring(0, 500),
+                });
+            }
+            return out;
+        }''', selector)
+        result['aria_targets'] = aria_targets
+
+        # Step 2: snapshot existing body children, hover+click to trigger floating panels
+        pre_ids = await page.evaluate('''() => {
+            return Array.from(document.body.children).map((el, i) =>
+                el.id || (el.className ? el.className.substring(0,30) : String(i))
+            );
+        }''')
+
+        try:
+            trigger = page.locator(f'{selector} button, {selector} [role="button"], {selector} a[href]').first
+            await trigger.hover(timeout=2000)
+            await _aio.sleep(0.25)
+            await trigger.click(timeout=2000)
+            await _aio.sleep(0.35)
+        except Exception:
+            pass
+
+        floating = await page.evaluate('''(preIds) => {
+            const out = [];
+            for (const el of document.body.children) {
+                const cs = window.getComputedStyle(el);
+                if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+                const id_or_cls = el.id || (el.className ? el.className.substring(0,30) : '');
+                if (preIds.includes(id_or_cls)) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0 || cs.display === 'none') continue;
+                out.push({
+                    tag: el.tagName.toLowerCase(),
+                    id: el.id || null,
+                    className: el.className.substring ? el.className.substring(0, 60) : '',
+                    position: cs.position,
+                    zIndex: cs.zIndex,
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                    backgroundColor: cs.backgroundColor,
+                    outerHTML: el.outerHTML.substring(0, 600),
+                });
+            }
+            return out;
+        }''', pre_ids)
+
+        result['floating_panels'] = floating
+        result['detected'] = len(aria_targets) > 0 or len(floating) > 0
+        return result
 
     async def _extract_component_states(self, page, selector: str) -> Dict:
         """

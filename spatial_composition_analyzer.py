@@ -79,6 +79,9 @@ class SpatialCompositionAnalyzer:
         # Layout grid detection
         grid_system = self._detect_layout_grid(spatial_data['elements'])
 
+        # Synthesize grid anatomy summary from container hierarchy
+        grid_anatomy = self._summarize_grid_anatomy(hierarchy)
+
         return {
             'pattern': f"Spatial composition analyzed: {len(spatial_data['elements'])} elements, {len(zones)} zones",
             'confidence': self._calculate_confidence(spatial_data),
@@ -90,6 +93,7 @@ class SpatialCompositionAnalyzer:
             'above_fold_layout': above_fold,
             'container_hierarchy': hierarchy,
             'layout_grid': grid_system,
+            'grid_anatomy': grid_anatomy,
             'viewport': spatial_data['viewport']
         }
 
@@ -1157,6 +1161,8 @@ class SpatialCompositionAnalyzer:
                     {
                         'tag': c['tag'],
                         'columns': c['styles']['gridTemplateColumns'],
+                        'column_count': self._parse_col_count(c['styles']['gridTemplateColumns']),
+                        'avg_track_width': self._avg_track_width(c['styles']['gridTemplateColumns']),
                         'children': len(c['children']),
                         'gap': c['styles'].get('gap', 'none'),
                     }
@@ -1166,6 +1172,72 @@ class SpatialCompositionAnalyzer:
             'total_layout_containers': len(containers),
             'all_gaps': sorted(set(all_gaps)),
             'all_paddings': sorted(set(all_paddings)),
+        }
+
+    @staticmethod
+    def _parse_col_count(grid_template_columns: str) -> int:
+        """Parse computed gridTemplateColumns into column count.
+        Computed values resolve auto-fill/minmax to actual track list (e.g. '150px 150px 150px').
+        """
+        if not grid_template_columns or grid_template_columns in ('none', 'subgrid', ''):
+            return 0
+        tokens = grid_template_columns.strip().split()
+        return sum(1 for t in tokens if t and t[0].isdigit() and float(t.rstrip('px%fre')) > 0)
+
+    @staticmethod
+    def _avg_track_width(grid_template_columns: str) -> str | None:
+        """Return average track width from computed gridTemplateColumns string."""
+        if not grid_template_columns or grid_template_columns in ('none', 'subgrid', ''):
+            return None
+        try:
+            vals = []
+            for t in grid_template_columns.strip().split():
+                if t and t[0].isdigit():
+                    num = float(t.replace('px', '').replace('fr', '').replace('%', ''))
+                    if num > 0:
+                        vals.append(num)
+            if not vals:
+                return None
+            avg = round(sum(vals) / len(vals))
+            # Determine unit from first token
+            unit = 'fr' if 'fr' in grid_template_columns and 'px' not in grid_template_columns else 'px'
+            return f'{avg}{unit}'
+        except (ValueError, AttributeError):
+            return None
+
+    def _summarize_grid_anatomy(self, hierarchy: Dict) -> Dict:
+        """Produce a human-readable grid anatomy summary from container hierarchy data."""
+        examples = hierarchy.get('grid_containers', {}).get('examples', [])
+        if not examples:
+            return {'detected': False, 'grids': []}
+
+        grids = []
+        for ex in examples:
+            col_count = ex.get('column_count', 0)
+            if col_count == 0:
+                continue
+            grids.append({
+                'selector': ex.get('tag', 'div'),
+                'columns': col_count,
+                'avg_track_width': ex.get('avg_track_width'),
+                'gap': ex.get('gap', 'none'),
+                'items': ex.get('children', 0),
+                'raw': ex.get('columns', ''),
+            })
+
+        # Find the dominant content grid (most items, valid column count)
+        content_grid = max(grids, key=lambda g: g['items']) if grids else None
+
+        return {
+            'detected': len(grids) > 0,
+            'grid_count': len(grids),
+            'grids': grids,
+            'dominant': content_grid,
+            'summary': (
+                f"{content_grid['columns']}-column grid, ~{content_grid['avg_track_width']} tracks, "
+                f"{content_grid['gap']} gap, {content_grid['items']} items"
+                if content_grid else 'No CSS grid detected'
+            ),
         }
 
     def _detect_layout_grid(self, elements: List[Dict]) -> Dict:

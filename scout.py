@@ -49,18 +49,24 @@ _TYPE_SIGNALS: Dict[str, list] = {
 }
 
 _PATH_TYPE_HINTS: Dict[str, str] = {
-    r'/docs?/':    'docs',
-    r'/blog/':     'blog',
-    r'/news/':     'blog',
-    r'/articles?/':'blog',
-    r'/press/':    'press',
-    r'/shop/':     'ecommerce',
-    r'/store/':    'ecommerce',
-    r'/search/':   'search',
-    r'/pricing':   'product',
-    r'/features?': 'product',
-    r'/about':     'landing',
-    r'/lp/':       'landing',
+    r'/docs?/':      'docs',
+    r'/blog/':       'blog',
+    r'/news/':       'blog',
+    r'/articles?/':  'blog',
+    r'/press/':      'press',
+    r'/shop/':       'ecommerce',
+    r'/store/':      'ecommerce',
+    r'/search/':     'search',
+    r'/pricing':     'product',
+    r'/features?':   'product',
+    r'/about':       'landing',
+    r'/lp/':         'landing',
+    # Media / radio site paths
+    r'/schedule':    'schedule',
+    r'/shows?/':     'shows',
+    r'/episodes?/':  'shows',
+    r'/discover':    'discover',
+    r'/archive':     'archive',
 }
 
 
@@ -228,7 +234,8 @@ def _select_diverse(pages: List[Dict], base_url: str, max_pages: int) -> List[st
         bucket.sort(reverse=True)
 
     # Interleave: one from each type in round-robin until we have max_pages
-    type_order = ['docs', 'blog', 'product', 'ecommerce', 'press', 'landing', 'other']
+    type_order = ['docs', 'schedule', 'shows', 'blog', 'product', 'ecommerce',
+                  'press', 'discover', 'archive', 'landing', 'other']
     # Ensure types present in results come before absent types
     present = [t for t in type_order if t in typed] + [t for t in typed if t not in type_order]
 
@@ -253,6 +260,89 @@ def _select_diverse(pages: List[Dict], base_url: str, max_pages: int) -> List[st
 
 
 # ── Public async interface ────────────────────────────────────────────────────
+
+async def smart_nav_candidates(
+    base_url: str,
+    limit: int = _DEFAULT_LIMIT,
+) -> Optional[List[Dict]]:
+    """
+    Raw classified page data for merged selection — does NOT apply diversity filter.
+
+    Returns [{url, type, word_count}, ...] sorted by content length descending,
+    or None if WaterCrawl is unavailable.  Callers merge this with their own
+    Playwright-discovered candidates before running unified selection.
+    """
+    key = _api_key()
+    if not key:
+        return None
+
+    print(f'   🌊 WaterCrawl: crawling {limit} pages of {base_url} (background)…')
+    uuid = await asyncio.to_thread(_start_crawl, base_url, key, limit)
+    if not uuid:
+        return None
+
+    pages = await asyncio.to_thread(_stream_results, uuid, key)
+    if not pages:
+        return []
+
+    result = []
+    for p in pages:
+        title = p['metadata'].get('title', '') or p['metadata'].get('og:title', '') or ''
+        md    = p['markdown']
+        ptype = _classify(p['url'], title, md)
+        result.append({
+            'url':        p['url'],
+            'type':       ptype,
+            'word_count': len(md.split()),
+        })
+
+    # Sort: richer pages first within each type bucket
+    result.sort(key=lambda x: -x['word_count'])
+
+    type_summary: Dict[str, int] = {}
+    for item in result:
+        type_summary[item['type']] = type_summary.get(item['type'], 0) + 1
+    summary_str = ', '.join(f"{v}× {k}" for k, v in sorted(type_summary.items()))
+    print(f'   🌊 WaterCrawl: {len(result)} pages — {summary_str}')
+
+    return result
+
+
+async def get_crawl_map(
+    base_url: str,
+    limit: int = 20,
+) -> Optional[List[Dict]]:
+    """
+    Returns classified page data from a WaterCrawl crawl — for visualization.
+    Each item: {url, title, type, word_count}
+    Returns None if WaterCrawl unavailable.
+    """
+    key = _api_key()
+    if not key:
+        return None
+
+    print(f'   🌊 WaterCrawl crawl-map: crawling {limit} pages of {base_url}…')
+    uuid = await asyncio.to_thread(_start_crawl, base_url, key, limit)
+    if not uuid:
+        return None
+
+    pages = await asyncio.to_thread(_stream_results, uuid, key)
+    if not pages:
+        return []
+
+    result = []
+    for p in pages:
+        title = p['metadata'].get('title', '') or p['metadata'].get('og:title', '') or ''
+        md = p['markdown']
+        ptype = _classify(p['url'], title, md)
+        result.append({
+            'url': p['url'],
+            'title': title,
+            'type': ptype,
+            'word_count': len(md.split()),
+        })
+    return result
+
 
 async def smart_nav_urls(
     base_url: str,
